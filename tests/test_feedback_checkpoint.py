@@ -1,0 +1,117 @@
+"""Checkpoint 3: /chat must return before the Gemini feedback-question
+generation completes, and the side panel must receive that question pushed
+over WebSocket once the decoupled background task finishes -- no client
+polling in the production path.
+
+Runs a real uvicorn server (in-process, real TCP) rather than the in-process
+ASGI transport used elsewhere, because Starlette's BackgroundTasks execute
+*before* an in-process ASGI call returns -- only a real server demonstrates
+that the client actually gets its response first.
+"""
+
+import asyncio
+import json
+import time
+from unittest.mock import AsyncMock, patch
+
+import httpx
+import pytest
+import uvicorn
+import websockets
+from sqlalchemy import delete
+
+from app.models import ChatSession
+from main import app
+
+GEMINI_DELAY_S = 1.0
+PORT = 8765
+
+
+@pytest.fixture
+async def live_server():
+    config = uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="warning")
+    server = uvicorn.Server(config)
+    task = asyncio.create_task(server.serve())
+    while not server.started:
+        await asyncio.sleep(0.01)
+    yield f"http://127.0.0.1:{PORT}"
+    server.should_exit = True
+    await task
+
+
+async def _slow_gemini(_messages: list[dict]) -> str:
+    await asyncio.sleep(GEMINI_DELAY_S)
+    return "How helpful was that reply?"
+
+
+async def test_chat_returns_before_gemini_completes_and_ws_pushes_question(
+    live_server, db_session
+):
+    with (
+        patch("app.routers.chat.send_chat_message", new=AsyncMock(return_value="hi there")),
+        patch("app.routers.chat.generate_feedback_question", new=_slow_gemini),
+    ):
+        async with httpx.AsyncClient(base_url=live_server) as client:
+            session_id = (await client.post("/session")).json()["id"]
+
+            # Connect the side panel's WebSocket before the chat turn happens,
+            # exactly as the real frontend does.
+            ws_url = f"ws://127.0.0.1:{PORT}/ws/feedback/{session_id}"
+            async with websockets.connect(ws_url) as ws:
+                start = time.monotonic()
+                chat_resp = await client.post(
+                    "/chat",
+                    json={"session_id": session_id, "message": "hello"},
+                    headers={"X-Nemotron-Key": "nvapi-test"},
+                )
+                elapsed = time.monotonic() - start
+
+                assert chat_resp.status_code == 200
+                assert elapsed < GEMINI_DELAY_S / 2, (
+                    f"/chat took {elapsed:.2f}s -- Gemini call appears to be blocking the response"
+                )
+
+                # Nothing pushed yet -- background generation is still "running".
+                # Pushed message only arrives once the background task finishes.
+                pushed = await asyncio.wait_for(ws.recv(), timeout=GEMINI_DELAY_S + 2)
+                data = json.loads(pushed)
+                assert data["question"] == "How helpful was that reply?"
+
+            # GET fallback reflects the same state for non-WS clients/tests.
+            fallback = (await client.get(f"/feedback-question/{session_id}")).json()
+            assert fallback["question"] == "How helpful was that reply?"
+
+    await db_session.execute(delete(ChatSession).where(ChatSession.id == session_id))
+    await db_session.commit()
+
+
+async def test_reconnecting_ws_gets_caught_up_with_existing_question(live_server, db_session):
+    """A panel that connects *after* a question was already generated (e.g.
+    on page reload) should be caught up immediately, not miss it."""
+    with (
+        patch("app.routers.chat.send_chat_message", new=AsyncMock(return_value="hi there")),
+        patch("app.routers.chat.generate_feedback_question", new=AsyncMock(return_value="Q?")),
+    ):
+        async with httpx.AsyncClient(base_url=live_server) as client:
+            session_id = (await client.post("/session")).json()["id"]
+            await client.post(
+                "/chat",
+                json={"session_id": session_id, "message": "hello"},
+                headers={"X-Nemotron-Key": "nvapi-test"},
+            )
+
+            # Give the background task a moment to store the question before
+            # this "late" connection arrives.
+            for _ in range(20):
+                data = (await client.get(f"/feedback-question/{session_id}")).json()
+                if data["question"]:
+                    break
+                await asyncio.sleep(0.05)
+
+            ws_url = f"ws://127.0.0.1:{PORT}/ws/feedback/{session_id}"
+            async with websockets.connect(ws_url) as ws:
+                pushed = json.loads(await asyncio.wait_for(ws.recv(), timeout=2))
+                assert pushed["question"] == "Q?"
+
+    await db_session.execute(delete(ChatSession).where(ChatSession.id == session_id))
+    await db_session.commit()
