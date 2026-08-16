@@ -76,8 +76,12 @@ async def submit_feedback(
     if chat_session is None or chat_session.user_id != user.id:
         raise HTTPException(status_code=404, detail="Unknown session_id")
 
+    chat_context = await feedback_question_store.get_context(body.session_id)
+
     try:
-        entry = await save_feedback(db, body.session_id, body.question, body.answer)
+        entry = await save_feedback(
+            db, body.session_id, body.question, body.answer, chat_context
+        )
     except IntegrityError as exc:  # FK violation if session_id doesn't exist
         await db.rollback()
         raise HTTPException(status_code=404, detail="Unknown session_id") from exc

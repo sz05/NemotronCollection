@@ -67,4 +67,9 @@ class FeedbackEntry(SQLModel, table=True):
     )
     question: str
     answer: str
+    # Snapshot of the conversation (same shape as ChatSession.messages) at
+    # the moment the feedback question was generated -- so postprocessing
+    # can pair each answer with exactly the exchange it judged, even if the
+    # chat continued afterwards.
+    chat_context: list = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
     created_at: datetime = Field(default_factory=_utcnow)

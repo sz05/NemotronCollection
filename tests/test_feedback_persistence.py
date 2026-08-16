@@ -12,7 +12,13 @@ from app.state import feedback_question_store
 
 async def test_feedback_round_trip_and_fk_join(auth_client, db_session):
     session_id = (await auth_client.post("/session")).json()["id"]
-    await feedback_question_store.set(uuid.UUID(session_id), "How was that reply?")
+    context = [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi there"},
+    ]
+    await feedback_question_store.set(
+        uuid.UUID(session_id), "How was that reply?", context=context
+    )
 
     resp = await auth_client.post(
         "/feedback",
@@ -38,6 +44,9 @@ async def test_feedback_round_trip_and_fk_join(auth_client, db_session):
     feedback_row, session_row = row
     assert feedback_row.answer == "Very clear and concise."
     assert session_row.id == uuid.UUID(session_id)
+
+    # The conversation snapshot from question-generation time rode along.
+    assert feedback_row.chat_context == context
 
     # Answering clears the pending question so the panel waits for the next one.
     assert await feedback_question_store.get(uuid.UUID(session_id)) is None

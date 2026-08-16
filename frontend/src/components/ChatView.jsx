@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 
@@ -106,9 +108,16 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage }) {
       <div className="chat-messages">
         {loading && <p className="chat-loading">Loading history...</p>}
         {messages.map((m, i) => (
-          <p key={i} className={`chat-message chat-message--${m.role}`}>
-            <strong>{m.role === 'user' ? 'You' : 'Nemotron'}:</strong> {m.content}
-          </p>
+          <div key={i} className={`chat-message chat-message--${m.role}`}>
+            <span className="chat-message-role">{m.role === 'user' ? 'You' : 'Nemotron'}</span>
+            {m.role === 'assistant' ? (
+              <div className="chat-message-body markdown-body">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+              </div>
+            ) : (
+              <div className="chat-message-body">{m.content}</div>
+            )}
+          </div>
         ))}
         {sendingHere && <p className="chat-loading">Nemotron is thinking...</p>}
         {error && <p className="chat-error">{error}</p>}

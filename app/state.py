@@ -17,21 +17,32 @@ from fastapi import WebSocket
 
 
 class FeedbackQuestionStore:
+    """Pending question per session, plus the conversation snapshot the
+    question was generated from (persisted into feedback_entry on answer)."""
+
     def __init__(self) -> None:
-        self._questions: dict[uuid.UUID, str] = {}
+        self._pending: dict[uuid.UUID, dict] = {}
         self._lock = asyncio.Lock()
 
-    async def set(self, session_id: uuid.UUID, question: str) -> None:
+    async def set(
+        self, session_id: uuid.UUID, question: str, context: list[dict] | None = None
+    ) -> None:
         async with self._lock:
-            self._questions[session_id] = question
+            self._pending[session_id] = {"question": question, "context": context or []}
 
     async def get(self, session_id: uuid.UUID) -> str | None:
         async with self._lock:
-            return self._questions.get(session_id)
+            entry = self._pending.get(session_id)
+            return entry["question"] if entry else None
+
+    async def get_context(self, session_id: uuid.UUID) -> list[dict]:
+        async with self._lock:
+            entry = self._pending.get(session_id)
+            return entry["context"] if entry else []
 
     async def clear(self, session_id: uuid.UUID) -> None:
         async with self._lock:
-            self._questions.pop(session_id, None)
+            self._pending.pop(session_id, None)
 
 
 class FeedbackConnectionManager:

@@ -37,7 +37,9 @@ async def _generate_and_store_feedback_question(session_id: uuid.UUID, messages:
     except GeminiError as exc:
         logger.warning("Gemini feedback question generation failed for %s: %s", session_id, exc)
         return
-    await feedback_question_store.set(session_id, question)
+    # Keep the conversation snapshot the question was generated from; it is
+    # persisted onto the feedback_entry row when the user answers.
+    await feedback_question_store.set(session_id, question, context=messages)
     # Push it straight to any connected side panel -- no client polling.
     await feedback_connection_manager.push(session_id, question)
 

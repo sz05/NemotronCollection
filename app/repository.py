@@ -117,9 +117,18 @@ async def append_turn(
 
 
 async def save_feedback(
-    db: AsyncSession, session_id: uuid.UUID, question: str, answer: str
+    db: AsyncSession,
+    session_id: uuid.UUID,
+    question: str,
+    answer: str,
+    chat_context: list[dict] | None = None,
 ) -> FeedbackEntry:
-    entry = FeedbackEntry(session_id=session_id, question=question, answer=answer)
+    entry = FeedbackEntry(
+        session_id=session_id,
+        question=question,
+        answer=answer,
+        chat_context=chat_context or [],
+    )
     db.add(entry)
     await db.commit()
     await db.refresh(entry)
