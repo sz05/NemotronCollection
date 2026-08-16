@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, WS_BASE_URL } from '../api/client'
 
-// Task 3.5 (live push) + task 4.1 (answer input): distinct panel (separate
-// from ChatView) connected over WebSocket to /ws/feedback/{sessionId}.
-// The backend pushes a question the moment the decoupled background Gemini
-// task (task 3.2) finishes -- no client polling. Answers post to
-// POST /feedback (task 4.2).
+// Task 3.5 (live push) + task 4.1 (answer input): feedback popup connected
+// over WebSocket to /ws/feedback/{sessionId}. The backend pushes a question
+// the moment the decoupled background Gemini task (task 3.2) finishes -- no
+// client polling. Answers post to POST /feedback (task 4.2).
+// The component stays mounted (the WebSocket must keep listening) but only
+// renders a modal while a question is awaiting an answer. There is no close
+// button on purpose: chat is gated until the question is answered (backend
+// enforces this with a 409 on /chat).
 // onPendingChange(true|false) tells the parent whether a question is
 // currently awaiting an answer, so it can gate the chat input.
 function FeedbackPanel({ sessionId, onPendingChange }) {
@@ -32,6 +35,7 @@ function FeedbackPanel({ sessionId, onPendingChange }) {
         setQuestion(data.question)
         setSubmitted(false)
         setAnswer('')
+        setError(null)
         onPendingChange?.(true)
       }
     }
@@ -60,34 +64,32 @@ function FeedbackPanel({ sessionId, onPendingChange }) {
     }
   }
 
-  const canAnswer = Boolean(question) && !submitted && !submitting
+  // Popup only while a question is awaiting an answer.
+  if (!question || submitted) return null
 
   return (
-    <aside className="feedback-panel">
-      <h2>
-        Feedback{' '}
-        <span className={`ws-status ws-status--${connected ? 'connected' : 'disconnected'}`}>
-          {connected ? '● live' : '○ connecting...'}
-        </span>
-      </h2>
-      <p className="feedback-question">
-        {submitted
-          ? 'Thanks! Waiting for the next question...'
-          : (question ?? 'Waiting for a question...')}
-      </p>
-      {error && <p className="chat-error">{error}</p>}
-      <form className="feedback-answer" onSubmit={handleSubmit}>
+    <div className="modal-overlay">
+      <form className="modal modal--feedback" onSubmit={handleSubmit}>
+        <h2>
+          Feedback{' '}
+          <span className={`ws-status ws-status--${connected ? 'connected' : 'disconnected'}`}>
+            {connected ? '● live' : '○ connecting...'}
+          </span>
+        </h2>
+        <p className="feedback-question">{question}</p>
+        {error && <p className="chat-error">{error}</p>}
         <textarea
+          autoFocus
           value={answer}
           onChange={(e) => setAnswer(e.target.value)}
           placeholder="Your answer..."
-          disabled={!canAnswer}
+          disabled={submitting}
         />
-        <button type="submit" disabled={!canAnswer || !answer.trim()}>
+        <button type="submit" disabled={submitting || !answer.trim()}>
           {submitting ? 'Submitting...' : 'Submit'}
         </button>
       </form>
-    </aside>
+    </div>
   )
 }
 
