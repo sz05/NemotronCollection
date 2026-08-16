@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 
@@ -14,8 +14,17 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage }) {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(false)
   const [draft, setDraft] = useState('')
-  const [sending, setSending] = useState(false)
+  // The one in-flight turn, tagged with the chat it belongs to:
+  // {sessionId, text}. The user may switch chats while Nemotron is
+  // replying; this tag makes sure the reply is applied (or the optimistic
+  // user message restored) only in that chat, never the one on screen.
+  const [pending, setPending] = useState(null)
   const [error, setError] = useState(null)
+
+  const activeSessionRef = useRef(sessionId)
+  activeSessionRef.current = sessionId
+  const pendingRef = useRef(pending)
+  pendingRef.current = pending
 
   // Load persisted history whenever the active chat changes.
   useEffect(() => {
@@ -27,7 +36,16 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage }) {
     api
       .getSession(sessionId)
       .then((data) => {
-        if (!cancelled) setMessages(data.messages)
+        if (cancelled) return
+        let history = data.messages
+        // Coming back to a chat whose turn is still in flight: the user
+        // message isn't persisted until Nemotron replies, so re-add the
+        // optimistic copy on top of the stored history.
+        const inFlight = pendingRef.current
+        if (inFlight && inFlight.sessionId === sessionId) {
+          history = [...history, { role: 'user', content: inFlight.text }]
+        }
+        setMessages(history)
       })
       .catch((err) => {
         if (!cancelled) setError(err.message)
@@ -40,28 +58,45 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage }) {
     }
   }, [sessionId])
 
+  const sendingHere = pending?.sessionId === sessionId
   const ready =
-    Boolean(sessionId && user?.has_nemotron_key) && !sending && !loading && !feedbackPending
+    Boolean(sessionId && user?.has_nemotron_key) &&
+    !pending &&
+    !loading &&
+    !feedbackPending
 
   async function handleSubmit(e) {
     e.preventDefault()
     const text = draft.trim()
     if (!text || !ready) return
 
+    const sid = sessionId
     const isFirstMessage = messages.length === 0
     setMessages((prev) => [...prev, { role: 'user', content: text }])
     setDraft('')
-    setSending(true)
+    setPending({ sessionId: sid, text })
     setError(null)
 
     try {
-      const { reply } = await api.sendChatMessage(sessionId, text)
-      setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
-      if (isFirstMessage) onFirstMessage?.(sessionId, text)
+      const { reply } = await api.sendChatMessage(sid, text)
+      // Only touch the screen if that chat is still the one being viewed;
+      // otherwise the turn is already persisted server-side and will load
+      // when the user returns to it.
+      if (activeSessionRef.current === sid) {
+        setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
+      }
+      if (isFirstMessage) onFirstMessage?.(sid, text)
     } catch (err) {
-      setError(err.message)
+      if (activeSessionRef.current === sid) {
+        setError(err.message)
+        // The failed turn was never persisted; drop the optimistic copy so
+        // the view matches the server.
+        setMessages((prev) =>
+          prev[prev.length - 1]?.role === 'user' ? prev.slice(0, -1) : prev
+        )
+      }
     } finally {
-      setSending(false)
+      setPending(null)
     }
   }
 
@@ -75,6 +110,7 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage }) {
             <strong>{m.role === 'user' ? 'You' : 'Nemotron'}:</strong> {m.content}
           </p>
         ))}
+        {sendingHere && <p className="chat-loading">Nemotron is thinking...</p>}
         {error && <p className="chat-error">{error}</p>}
       </div>
       {feedbackPending && (
@@ -91,7 +127,7 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage }) {
           disabled={!sessionId || feedbackPending}
         />
         <button type="submit" disabled={!ready || !draft.trim()}>
-          {sending ? 'Sending...' : 'Send'}
+          {pending ? 'Sending...' : 'Send'}
         </button>
       </form>
     </section>
