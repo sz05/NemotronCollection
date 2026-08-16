@@ -1,5 +1,6 @@
-"""Session + chat routes (tasks 2.2, 2.4, 2.6, and the session-creation
-endpoint needed to hand the frontend a session_id before the first turn)."""
+"""Session + chat routes (tasks 2.2, 2.4, 2.6), now user-scoped: every
+route requires the auth cookie, sessions belong to the logged-in user, and
+one user can hold many chats (sidebar lists them via GET /sessions)."""
 
 import logging
 import uuid
@@ -8,8 +9,17 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.repository import append_turn, create_session, get_chat_session
-from app.schemas import ChatRequest, ChatResponse, SessionOut
+from app.deps import get_current_user
+from app.models import ChatSession, User
+from app.repository import append_turn, create_session, get_chat_session, list_sessions
+from app.schemas import (
+    ChatRequest,
+    ChatResponse,
+    SessionDetailOut,
+    SessionOut,
+    SessionSummaryOut,
+)
+from app.services.auth import AuthError, decrypt_api_key
 from app.services.gemini import GeminiError, generate_feedback_question
 from app.services.nemotron import NemotronError, send_chat_message
 from app.state import feedback_connection_manager, feedback_question_store
@@ -32,38 +42,92 @@ async def _generate_and_store_feedback_question(session_id: uuid.UUID, messages:
     await feedback_connection_manager.push(session_id, question)
 
 
+async def _get_owned_session(
+    db: AsyncSession, session_id: uuid.UUID, user: User
+) -> ChatSession:
+    session = await get_chat_session(db, session_id)
+    if session is None or session.user_id != user.id:
+        # 404 (not 403) for foreign sessions: don't reveal they exist.
+        raise HTTPException(status_code=404, detail=f"ChatSession {session_id} not found")
+    return session
+
+
 @router.post("/session", response_model=SessionOut)
-async def create_chat_session(db: AsyncSession = Depends(get_session)) -> SessionOut:
-    session = await create_session(db)
+async def create_chat_session(
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_session)
+) -> SessionOut:
+    session = await create_session(db, user.id)
     return SessionOut(id=session.id)
+
+
+@router.get("/sessions", response_model=list[SessionSummaryOut])
+async def list_chat_sessions(
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_session)
+) -> list[SessionSummaryOut]:
+    sessions = await list_sessions(db, user.id)
+    return [
+        SessionSummaryOut(id=s.id, title=s.title, created_at=s.created_at) for s in sessions
+    ]
+
+
+@router.get("/sessions/{session_id}", response_model=SessionDetailOut)
+async def get_chat_session_detail(
+    session_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> SessionDetailOut:
+    session = await _get_owned_session(db, session_id, user)
+    return SessionDetailOut(
+        id=session.id,
+        title=session.title,
+        messages=session.messages,
+        created_at=session.created_at,
+    )
 
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     body: ChatRequest,
     background_tasks: BackgroundTasks,
-    x_nemotron_key: str = Header(..., alias="X-Nemotron-Key"),
+    x_nemotron_key: str | None = Header(default=None, alias="X-Nemotron-Key"),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> ChatResponse:
-    # Task 2.2: the key lives only in this request's local variable/header --
-    # it is never written to a log statement, a DB column, or a module-level
-    # variable. It is passed straight through to the Nemotron client below.
-    if not x_nemotron_key:
-        raise HTTPException(status_code=401, detail="Missing X-Nemotron-Key header")
+    session = await _get_owned_session(db, body.session_id, user)
 
-    session = await get_chat_session(db, body.session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail=f"ChatSession {body.session_id} not found")
+    # Key resolution: an explicit header wins (lets a user try a different
+    # key without saving it); otherwise decrypt the one stored on the user.
+    # Either way it lives only in this request's locals and is never logged.
+    api_key = x_nemotron_key
+    if not api_key:
+        if not user.nemotron_key_encrypted:
+            raise HTTPException(
+                status_code=401, detail="No Nemotron API key on file -- save one first"
+            )
+        try:
+            api_key = decrypt_api_key(user.nemotron_key_encrypted)
+        except AuthError as exc:
+            raise HTTPException(
+                status_code=401, detail="Stored API key is unreadable -- re-enter it"
+            ) from exc
+
+    # A pending feedback question blocks the next chat turn: the user must
+    # answer it (POST /feedback clears the store) before chatting again.
+    # Enforced here so the rule holds even for clients that bypass the UI.
+    if await feedback_question_store.get(body.session_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Answer the pending feedback question before sending a new message",
+        )
 
     # Task 2.6: the user's turn is NOT persisted yet here -- only sent to
     # Nemotron as part of the wire history. If the call fails, nothing is
     # written, so a retry doesn't resend a malformed history with a
-    # dangling, unanswered user turn (that previously made the model
-    # noticeably slower/less reliable on retries).
+    # dangling, unanswered user turn.
     wire_messages = [*session.messages, {"role": "user", "content": body.message}]
 
     try:
-        reply = await send_chat_message(x_nemotron_key, wire_messages)
+        reply = await send_chat_message(api_key, wire_messages)
     except NemotronError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

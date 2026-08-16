@@ -6,7 +6,9 @@ import { api, WS_BASE_URL } from '../api/client'
 // The backend pushes a question the moment the decoupled background Gemini
 // task (task 3.2) finishes -- no client polling. Answers post to
 // POST /feedback (task 4.2).
-function FeedbackPanel({ sessionId }) {
+// onPendingChange(true|false) tells the parent whether a question is
+// currently awaiting an answer, so it can gate the chat input.
+function FeedbackPanel({ sessionId, onPendingChange }) {
   const [question, setQuestion] = useState(null)
   const [connected, setConnected] = useState(false)
   const [answer, setAnswer] = useState('')
@@ -30,10 +32,14 @@ function FeedbackPanel({ sessionId }) {
         setQuestion(data.question)
         setSubmitted(false)
         setAnswer('')
+        onPendingChange?.(true)
       }
     }
 
-    return () => ws.close()
+    return () => {
+      ws.close()
+      onPendingChange?.(false)
+    }
   }, [sessionId])
 
   async function handleSubmit(e) {
@@ -46,6 +52,7 @@ function FeedbackPanel({ sessionId }) {
     try {
       await api.submitFeedback(sessionId, question, text)
       setSubmitted(true)
+      onPendingChange?.(false)
     } catch (err) {
       setError(err.message)
     } finally {

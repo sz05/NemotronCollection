@@ -4,27 +4,17 @@ once answered."""
 
 import uuid
 
-import pytest
-from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
 from app.models import ChatSession, FeedbackEntry
 from app.state import feedback_question_store
-from main import app
 
 
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
-
-
-async def test_feedback_round_trip_and_fk_join(client, db_session):
-    session_id = (await client.post("/session")).json()["id"]
+async def test_feedback_round_trip_and_fk_join(auth_client, db_session):
+    session_id = (await auth_client.post("/session")).json()["id"]
     await feedback_question_store.set(uuid.UUID(session_id), "How was that reply?")
 
-    resp = await client.post(
+    resp = await auth_client.post(
         "/feedback",
         json={
             "session_id": session_id,
@@ -58,8 +48,8 @@ async def test_feedback_round_trip_and_fk_join(client, db_session):
     await db_session.commit()
 
 
-async def test_feedback_rejects_unknown_session(client):
-    resp = await client.post(
+async def test_feedback_rejects_unknown_session(auth_client):
+    resp = await auth_client.post(
         "/feedback",
         json={
             "session_id": "00000000-0000-0000-0000-000000000000",

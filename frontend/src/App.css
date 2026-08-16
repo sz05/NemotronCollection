@@ -62,6 +62,12 @@
   color: #f44336;
 }
 
+.chat-feedback-gate {
+  color: #e6a817;
+  font-size: 0.9em;
+  margin: 0 0 6px;
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -98,5 +104,139 @@
 }
 
 .ws-status--disconnected {
+  color: #888;
+}
+
+/* --- Login --- */
+
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-card {
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 2rem;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: center;
+  text-align: center;
+}
+
+.login-card h1 {
+  font-size: 1.3rem;
+  margin: 0;
+}
+
+.dev-login {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  border-top: 1px solid #333;
+  padding-top: 1rem;
+}
+
+.dev-login-label {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.dev-login input {
+  padding: 0.5rem;
+}
+
+/* --- Sidebar / multi-chat layout --- */
+
+.app-layout--with-sidebar {
+  grid-template-columns: 220px 2fr 1fr;
+}
+
+.chat-sidebar {
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 60vh;
+}
+
+.new-chat-button {
+  width: 100%;
+}
+
+.chat-list {
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.chat-list-item {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-list-item:hover {
+  border-color: #444;
+}
+
+.chat-list-item--active {
+  background: #2a2a2a;
+  border-color: #555;
+}
+
+.chat-list-empty {
+  color: #888;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.5rem;
+}
+
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-top: 1px solid #333;
+  padding-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.sidebar-user img {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.sidebar-user-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logout-button {
+  font-size: 0.75rem;
+}
+
+.chat-loading {
   color: #888;
 }

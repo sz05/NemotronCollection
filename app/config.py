@@ -27,5 +27,17 @@ class Settings(BaseSettings):
 
     gemini_model: str = "gemini-3.5-flash-lite"
 
+    # --- Auth (Google OAuth + JWT cookie) ---
+    # OAuth 2.0 Web client ID from Google Cloud Console. Login button is
+    # hidden on the frontend until this is set.
+    google_client_id: str = ""
+    # Signs the session JWT and derives the Fernet key that encrypts stored
+    # Nemotron API keys. MUST be overridden in .env for anything non-local.
+    jwt_secret: str = "dev-only-secret-change-me-before-deploying"
+    jwt_expiry_days: int = 7
+    # Dev-only email login (no password) for local testing without a Google
+    # client ID. Never enable in production.
+    dev_auth: bool = False
+
 
 settings = Settings()

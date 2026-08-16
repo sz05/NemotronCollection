@@ -7,9 +7,10 @@ from app.models import ChatSession, FeedbackEntry
 from app.repository import append_message, create_session, save_feedback
 
 
-async def test_session_message_and_feedback_round_trip(db_session):
-    session = await create_session(db_session)
+async def test_session_message_and_feedback_round_trip(db_session, test_user):
+    session = await create_session(db_session, test_user.id)
     assert session.id is not None
+    assert session.user_id == test_user.id
     assert session.messages == []
 
     session = await append_message(db_session, session.id, "user", "hello")
