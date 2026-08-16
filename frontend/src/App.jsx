@@ -68,7 +68,7 @@ function App() {
     <div className="app-shell">
       <ApiKeyModal />
       <header className="app-header">
-        <h1>CCS GPT</h1>
+        <h1>Nemotron Harness</h1>
         <span className={`backend-status backend-status--${backendStatus}`}>
           backend: {backendStatus}
         </span>
