@@ -7,7 +7,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import settings
 
-engine = create_async_engine(settings.database_url, echo=False, future=True)
+def _async_url(url: str) -> str:
+    """Force the asyncpg driver: hosted providers hand out plain
+    postgres:// / postgresql:// URLs, which SQLAlchemy resolves to the
+    sync psycopg2 driver."""
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
+
+engine = create_async_engine(_async_url(settings.database_url), echo=False, future=True)
 
 async_session_factory = async_sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False

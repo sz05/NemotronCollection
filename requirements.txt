@@ -12,4 +12,3 @@ PyJWT>=2.8
 google-auth>=2.29
 cryptography>=42.0
 requests>=2.31
-psycopg2
