@@ -1,17 +1,31 @@
 import { useState } from 'react'
-import { useNemotronKey } from '../context/NemotronKeyContext'
+import { api } from '../api/client'
+import { useAuth } from '../context/AuthContext'
 
-// Task 2.1: prompt/modal that collects the user's Nemotron API key and
-// holds it in the active session only (see NemotronKeyContext).
+// Collects the user's Nemotron API key once after login and stores it
+// (encrypted) on their account via PUT /auth/nemotron-key. Shown only
+// while the account has no key on file.
 function ApiKeyModal() {
-  const { nemotronKey, setNemotronKey } = useNemotronKey()
+  const { user, setUser } = useAuth()
   const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
 
-  if (nemotronKey) return null
+  if (!user || user.has_nemotron_key) return null
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
-    if (draft.trim()) setNemotronKey(draft.trim())
+    const key = draft.trim()
+    if (!key) return
+    setSaving(true)
+    setError(null)
+    try {
+      setUser(await api.saveNemotronKey(key))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -19,8 +33,8 @@ function ApiKeyModal() {
       <form className="modal" onSubmit={handleSubmit}>
         <h2>Enter your Nemotron API key</h2>
         <p>
-          Held only in memory for this session. Never sent anywhere except
-          the Nemotron API, and never saved to the database.
+          Stored encrypted on your account so you only enter it once. Used
+          solely to call the Nemotron API on your behalf.
         </p>
         <input
           type="password"
@@ -29,8 +43,9 @@ function ApiKeyModal() {
           onChange={(e) => setDraft(e.target.value)}
           placeholder="nvapi-..."
         />
-        <button type="submit" disabled={!draft.trim()}>
-          Continue
+        {error && <p className="chat-error">{error}</p>}
+        <button type="submit" disabled={!draft.trim() || saving}>
+          {saving ? 'Saving...' : 'Continue'}
         </button>
       </form>
     </div>

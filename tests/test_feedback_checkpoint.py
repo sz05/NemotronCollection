@@ -20,11 +20,22 @@ import uvicorn
 import websockets
 from sqlalchemy import delete
 
+from app.config import settings
 from app.models import ChatSession
 from main import app
+from tests.conftest import TEST_EMAIL
 
 GEMINI_DELAY_S = 1.0
 PORT = 8765
+
+
+async def _login(client: httpx.AsyncClient) -> str:
+    """Dev-login on the live server; returns the auth cookie value for the
+    WebSocket handshake (httpx keeps it for HTTP calls automatically)."""
+    settings.dev_auth = True
+    resp = await client.post("/auth/dev-login", json={"email": TEST_EMAIL})
+    assert resp.status_code == 200, resp.text
+    return client.cookies["access_token"]
 
 
 @pytest.fixture
@@ -52,12 +63,14 @@ async def test_chat_returns_before_gemini_completes_and_ws_pushes_question(
         patch("app.routers.chat.generate_feedback_question", new=_slow_gemini),
     ):
         async with httpx.AsyncClient(base_url=live_server) as client:
+            token = await _login(client)
             session_id = (await client.post("/session")).json()["id"]
 
             # Connect the side panel's WebSocket before the chat turn happens,
-            # exactly as the real frontend does.
+            # exactly as the real frontend does (cookie rides the handshake).
             ws_url = f"ws://127.0.0.1:{PORT}/ws/feedback/{session_id}"
-            async with websockets.connect(ws_url) as ws:
+            ws_headers = {"Cookie": f"access_token={token}"}
+            async with websockets.connect(ws_url, additional_headers=ws_headers) as ws:
                 start = time.monotonic()
                 chat_resp = await client.post(
                     "/chat",
@@ -93,6 +106,7 @@ async def test_reconnecting_ws_gets_caught_up_with_existing_question(live_server
         patch("app.routers.chat.generate_feedback_question", new=AsyncMock(return_value="Q?")),
     ):
         async with httpx.AsyncClient(base_url=live_server) as client:
+            token = await _login(client)
             session_id = (await client.post("/session")).json()["id"]
             await client.post(
                 "/chat",
@@ -109,7 +123,8 @@ async def test_reconnecting_ws_gets_caught_up_with_existing_question(live_server
                 await asyncio.sleep(0.05)
 
             ws_url = f"ws://127.0.0.1:{PORT}/ws/feedback/{session_id}"
-            async with websockets.connect(ws_url) as ws:
+            ws_headers = {"Cookie": f"access_token={token}"}
+            async with websockets.connect(ws_url, additional_headers=ws_headers) as ws:
                 pushed = json.loads(await asyncio.wait_for(ws.recv(), timeout=2))
                 assert pushed["question"] == "Q?"
 

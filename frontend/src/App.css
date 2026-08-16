@@ -54,12 +54,142 @@
   flex: 1;
 }
 
+.chat-message {
+  margin: 0 0 0.75rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: 8px;
+  max-width: 92%;
+}
+
 .chat-message--user {
-  opacity: 0.85;
+  background: #24304a;
+  margin-left: auto;
+}
+
+.chat-message--assistant {
+  background: #232323;
+  border: 1px solid #333;
+}
+
+.chat-message-role {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #888;
+  margin-bottom: 0.25rem;
+}
+
+.chat-message-body {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* Markdown-rendered assistant replies */
+
+.markdown-body {
+  white-space: normal;
+  line-height: 1.55;
+}
+
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body pre,
+.markdown-body blockquote,
+.markdown-body table {
+  margin: 0.5rem 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 1.05rem;
+  line-height: 1.3;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.4rem;
+}
+
+.markdown-body li {
+  margin: 0.15rem 0;
+}
+
+.markdown-body code {
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.85em;
+}
+
+.markdown-body pre {
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 0.75rem;
+  overflow-x: auto;
+}
+
+.markdown-body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.markdown-body blockquote {
+  border-left: 3px solid #555;
+  padding-left: 0.75rem;
+  color: #aaa;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #444;
+  padding: 0.3rem 0.6rem;
+}
+
+.markdown-body th {
+  background: #2a2a2a;
+}
+
+.markdown-body a {
+  color: #7ab8ff;
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid #3a3a3a;
+  margin: 0.75rem 0;
 }
 
 .chat-error {
   color: #f44336;
+}
+
+.chat-feedback-gate {
+  color: #e6a817;
+  font-size: 0.9em;
+  margin: 0 0 6px;
 }
 
 .modal-overlay {
@@ -98,5 +228,139 @@
 }
 
 .ws-status--disconnected {
+  color: #888;
+}
+
+/* --- Login --- */
+
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-card {
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 2rem;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: center;
+  text-align: center;
+}
+
+.login-card h1 {
+  font-size: 1.3rem;
+  margin: 0;
+}
+
+.dev-login {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  border-top: 1px solid #333;
+  padding-top: 1rem;
+}
+
+.dev-login-label {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.dev-login input {
+  padding: 0.5rem;
+}
+
+/* --- Sidebar / multi-chat layout --- */
+
+.app-layout--with-sidebar {
+  grid-template-columns: 220px 2fr 1fr;
+}
+
+.chat-sidebar {
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 60vh;
+}
+
+.new-chat-button {
+  width: 100%;
+}
+
+.chat-list {
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.chat-list-item {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-list-item:hover {
+  border-color: #444;
+}
+
+.chat-list-item--active {
+  background: #2a2a2a;
+  border-color: #555;
+}
+
+.chat-list-empty {
+  color: #888;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.5rem;
+}
+
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-top: 1px solid #333;
+  padding-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.sidebar-user img {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.sidebar-user-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logout-button {
+  font-size: 0.75rem;
+}
+
+.chat-loading {
   color: #888;
 }

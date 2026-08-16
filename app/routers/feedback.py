@@ -8,9 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_session
-from app.repository import save_feedback
+from app.db import async_session_factory, get_session
+from app.deps import get_current_user
+from app.models import User
+from app.repository import get_chat_session, save_feedback
 from app.schemas import FeedbackOut, FeedbackQuestionOut, FeedbackRequest
+from app.services.auth import AUTH_COOKIE_NAME, AuthError, decode_session_token
 from app.state import feedback_connection_manager, feedback_question_store
 
 router = APIRouter()
@@ -21,6 +24,22 @@ async def feedback_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
     """Task 3.4 (WS variant): the side panel connects once per session and
     receives questions pushed the moment the background Gemini task (task
     3.2) finishes -- no client polling."""
+    # The browser sends the auth cookie on the WS handshake; only the
+    # session's owner may listen for its feedback questions.
+    token = websocket.cookies.get(AUTH_COOKIE_NAME)
+    try:
+        user_id = decode_session_token(token) if token else None
+    except AuthError:
+        user_id = None
+    if user_id is None:
+        await websocket.close(code=4401)
+        return
+    async with async_session_factory() as db:
+        chat_session = await get_chat_session(db, session_id)
+    if chat_session is None or chat_session.user_id != user_id:
+        await websocket.close(code=4404)
+        return
+
     await feedback_connection_manager.connect(session_id, websocket)
     try:
         # Catch the panel up immediately if a question was already generated
@@ -49,10 +68,20 @@ async def get_feedback_question(session_id: uuid.UUID) -> FeedbackQuestionOut:
 
 @router.post("/feedback", response_model=FeedbackOut)
 async def submit_feedback(
-    body: FeedbackRequest, db: AsyncSession = Depends(get_session)
+    body: FeedbackRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
 ) -> FeedbackOut:
+    chat_session = await get_chat_session(db, body.session_id)
+    if chat_session is None or chat_session.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Unknown session_id")
+
+    chat_context = await feedback_question_store.get_context(body.session_id)
+
     try:
-        entry = await save_feedback(db, body.session_id, body.question, body.answer)
+        entry = await save_feedback(
+            db, body.session_id, body.question, body.answer, chat_context
+        )
     except IntegrityError as exc:  # FK violation if session_id doesn't exist
         await db.rollback()
         raise HTTPException(status_code=404, detail="Unknown session_id") from exc
