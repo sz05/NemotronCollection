@@ -13,7 +13,12 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/harness"
     gemini_api_key: str = ""
-    frontend_origin: str = "http://localhost:5173"
+    # Comma-separated list of allowed CORS origins (no trailing slashes).
+    frontend_origin: str = "http://localhost:5173,https://nemotron-collection.vercel.app"
+
+    @property
+    def frontend_origins(self) -> list[str]:
+        return [o.strip().rstrip("/") for o in self.frontend_origin.split(",") if o.strip()]
 
     # Nemotron is an OpenAI-compatible chat completions endpoint (NVIDIA NIM /
     # build.nvidia.com). No secret here -- the key travels per-request only.

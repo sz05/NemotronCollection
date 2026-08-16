@@ -20,10 +20,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Synthetic Data Collection Harness", lifespan=lifespan)
 
-# Task 0.6: allow the Vite dev origin to call this API directly (SPA, no templates).
+# Task 0.6: allow the frontend origins (Vite dev + deployed) to call this API
+# directly (SPA, no templates).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
+    allow_origins=settings.frontend_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
