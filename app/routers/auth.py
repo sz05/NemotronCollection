@@ -51,9 +51,10 @@ def _set_auth_cookie(response: Response, user: User) -> None:
         create_session_token(user.id),
         max_age=settings.jwt_expiry_days * 24 * 3600,
         httponly=True,
-        samesite="lax",
-        # secure=False is acceptable for localhost dev; set True behind HTTPS.
-        secure=False,
+        samesite=settings.cookie_samesite,
+        # Browsers reject SameSite=None cookies without Secure; plain
+        # secure=False stays for localhost dev where samesite is "lax".
+        secure=settings.cookie_samesite.lower() == "none",
     )
 
 
@@ -99,7 +100,13 @@ async def dev_login(
 
 @router.post("/logout")
 async def logout(response: Response) -> dict:
-    response.delete_cookie(AUTH_COOKIE_NAME)
+    # Attributes must match the ones the cookie was set with, or some
+    # browsers ignore the deletion.
+    response.delete_cookie(
+        AUTH_COOKIE_NAME,
+        samesite=settings.cookie_samesite,
+        secure=settings.cookie_samesite.lower() == "none",
+    )
     return {"ok": True}
 
 

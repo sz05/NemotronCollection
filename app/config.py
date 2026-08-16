@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     # Dev-only email login (no password) for local testing without a Google
     # client ID. Never enable in production.
     dev_auth: bool = False
+    # "lax" works when frontend and backend share a site (localhost dev).
+    # Set to "none" when the frontend is on a different domain (e.g. Vercel
+    # frontend + Railway backend) — browsers drop Lax cookies on cross-site
+    # requests. "none" forces Secure=True, so the backend must be on HTTPS.
+    cookie_samesite: str = "lax"
 
 
 settings = Settings()
