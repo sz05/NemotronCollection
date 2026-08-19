@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import RelevanceWarningModal from './RelevanceWarningModal'
 
 // Task 2.5: sends user messages to POST /chat and renders the conversation.
 // The Nemotron key is resolved server-side from the user's account.
@@ -11,11 +12,15 @@ import { useAuth } from '../context/AuthContext'
 // also rejects /chat with a 409 in that state).
 // onFirstMessage fires after the first turn of a chat so the sidebar can
 // refresh its title.
-function ChatView({ sessionId, feedbackPending, onFirstMessage }) {
+function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
   const { user } = useAuth()
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(false)
   const [draft, setDraft] = useState('')
+  // Off-topic confirmation: when /chat returns a relevance_warning we stash the
+  // warning plus the exact message so "Yes, continue" can resend it with the
+  // acknowledge flag, and "No, go back" can restore it into the draft box.
+  const [relevanceWarning, setRelevanceWarning] = useState(null)
   // The one in-flight turn, tagged with the chat it belongs to:
   // {sessionId, text}. The user may switch chats while Nemotron is
   // replying; this tag makes sure the reply is applied (or the optimistic
@@ -71,23 +76,38 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage }) {
     e.preventDefault()
     const text = draft.trim()
     if (!text || !ready) return
+    setDraft('')
+    await sendMessage(text, false)
+  }
 
+  // Sends one turn. When acknowledgeOfftopic is false the backend may reply with
+  // a relevance_warning instead of an answer; we surface the confirm dialog and
+  // keep the optimistic user bubble so the resend flows straight through.
+  async function sendMessage(text, acknowledgeOfftopic) {
     const sid = sessionId
     const isFirstMessage = messages.length === 0
-    setMessages((prev) => [...prev, { role: 'user', content: text }])
-    setDraft('')
+    if (!acknowledgeOfftopic) {
+      setMessages((prev) => [...prev, { role: 'user', content: text }])
+    }
     setPending({ sessionId: sid, text })
     setError(null)
 
     try {
-      const { reply } = await api.sendChatMessage(sid, text)
-      // Only touch the screen if that chat is still the one being viewed;
-      // otherwise the turn is already persisted server-side and will load
-      // when the user returns to it.
-      if (activeSessionRef.current === sid) {
-        setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
+      const { reply, relevance_warning } = await api.sendChatMessage(sid, text, {
+        acknowledgeOfftopic,
+      })
+      if (activeSessionRef.current !== sid) return
+
+      // Off-topic and not yet acknowledged: no answer was produced. Show the
+      // confirm dialog; the optimistic user bubble stays on screen.
+      if (relevance_warning && !acknowledgeOfftopic) {
+        setRelevanceWarning({ warning: relevance_warning, text, sid })
+        return
       }
+
+      setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
       if (isFirstMessage) onFirstMessage?.(sid, text)
+      onSent?.(sid)
     } catch (err) {
       if (activeSessionRef.current === sid) {
         setError(err.message)
@@ -100,6 +120,23 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage }) {
     } finally {
       setPending(null)
     }
+  }
+
+  function handleWarningContinue() {
+    const w = relevanceWarning
+    setRelevanceWarning(null)
+    if (w) sendMessage(w.text, true)
+  }
+
+  function handleWarningCancel() {
+    const w = relevanceWarning
+    setRelevanceWarning(null)
+    if (!w) return
+    // Drop the optimistic user bubble and restore the text into the draft box.
+    setMessages((prev) =>
+      prev[prev.length - 1]?.role === 'user' ? prev.slice(0, -1) : prev
+    )
+    setDraft(w.text)
   }
 
   return (
@@ -139,6 +176,12 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage }) {
           {pending ? 'Sending...' : 'Send'}
         </button>
       </form>
+      <RelevanceWarningModal
+        open={Boolean(relevanceWarning)}
+        warning={relevanceWarning?.warning}
+        onContinue={handleWarningContinue}
+        onCancel={handleWarningCancel}
+      />
     </section>
   )
 }

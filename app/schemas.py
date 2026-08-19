@@ -53,11 +53,14 @@ class NemotronKeyRequest(BaseModel):
 class ChatRequest(BaseModel):
     session_id: uuid.UUID
     message: str
+    acknowledge_offtopic: bool = False
 
 
 class ChatResponse(BaseModel):
     session_id: uuid.UUID
     reply: str
+    # Set when the message is judged off-topic: {"score": float, "message": str}.
+    relevance_warning: dict | None = None
 
 
 class FeedbackQuestionOut(BaseModel):
@@ -75,4 +78,81 @@ class FeedbackOut(BaseModel):
     session_id: uuid.UUID
     question: str
     answer: str
+    created_at: datetime
+
+
+# --- Tasks ---
+class TaskCreate(BaseModel):
+    title: str
+    description: str
+    difficulty: str = "medium"
+    base_points: int = 100
+    proof_types: list[str] = []
+    instructions: str = ""
+
+
+class TaskOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    description: str
+    difficulty: str
+    base_points: int
+    proof_types: list
+    instructions: str
+    active: bool
+
+
+# --- Sessions / scoring ---
+class SessionCreateRequest(BaseModel):
+    task_id: uuid.UUID | None = None
+
+
+class ScoreOut(BaseModel):
+    session_id: uuid.UUID
+    live_score: float
+    components: dict
+
+
+# --- Proof submissions ---
+class ProofOut(BaseModel):
+    id: uuid.UUID
+    status: str
+    proof_type: str
+    created_at: datetime
+
+
+# --- Leaderboard ---
+class LeaderboardEntryOut(BaseModel):
+    rank: int
+    user_id: uuid.UUID
+    display_name: str
+    total_points: int
+    tasks_completed: int
+    avg_live_score: float
+
+
+class LeaderboardOut(BaseModel):
+    entries: list[LeaderboardEntryOut]
+    me: LeaderboardEntryOut | None = None
+
+
+# --- Admin review ---
+class ReviewRequest(BaseModel):
+    decision: str
+    quality_factor: float | None = None
+    notes: str | None = None
+
+
+class AdminProofOut(BaseModel):
+    id: uuid.UUID
+    session_id: uuid.UUID
+    task_id: uuid.UUID
+    user_id: uuid.UUID
+    proof_type: str
+    storage_ref: str | None
+    url: str | None
+    status: str
+    sha256: str | None
+    phash: str | None
+    meta: dict
     created_at: datetime

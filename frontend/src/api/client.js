@@ -41,6 +41,36 @@ async function request(path, { method = 'GET', body, nemotronKey, signal } = {})
   return contentType.includes('application/json') ? res.json() : res.text()
 }
 
+// Multipart variant: the browser must set the multipart boundary itself, so we
+// deliberately do NOT set Content-Type when sending a FormData body.
+async function requestForm(path, formData, { method = 'POST', nemotronKey, signal } = {}) {
+  const headers = {}
+  if (nemotronKey) headers['X-Nemotron-Key'] = nemotronKey
+
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers,
+    body: formData,
+    credentials: 'include',
+    signal,
+  })
+
+  if (!res.ok) {
+    let detail = await res.text().catch(() => '')
+    try {
+      detail = JSON.parse(detail).detail ?? detail
+    } catch {
+      /* not JSON, keep raw text */
+    }
+    const err = new Error(detail || `API ${method} ${path} failed: ${res.status}`)
+    err.status = res.status
+    throw err
+  }
+
+  const contentType = res.headers.get('content-type') || ''
+  return contentType.includes('application/json') ? res.json() : res.text()
+}
+
 export const api = {
   health: () => request('/health'),
 
@@ -55,11 +85,15 @@ export const api = {
     request('/auth/nemotron-key', { method: 'PUT', body: { api_key: apiKey } }),
 
   // --- chats ---
-  createSession: () => request('/session', { method: 'POST' }),
+  createSession: (taskId = null) =>
+    request('/session', { method: 'POST', body: { task_id: taskId } }),
   listSessions: () => request('/sessions'),
   getSession: (sessionId) => request(`/sessions/${sessionId}`),
-  sendChatMessage: (sessionId, message) =>
-    request('/chat', { method: 'POST', body: { session_id: sessionId, message } }),
+  sendChatMessage: (sessionId, message, { acknowledgeOfftopic = false } = {}) =>
+    request('/chat', {
+      method: 'POST',
+      body: { session_id: sessionId, message, acknowledge_offtopic: acknowledgeOfftopic },
+    }),
 
   // --- feedback ---
   getFeedbackQuestion: (sessionId) => request(`/feedback-question/${sessionId}`),
@@ -68,6 +102,14 @@ export const api = {
       method: 'POST',
       body: { session_id: sessionId, question, answer },
     }),
+
+  // --- tasks / scoring / proof / leaderboard ---
+  getTasks: () => request('/tasks'),
+  getScore: (sessionId) => request(`/sessions/${sessionId}/score`),
+  getLeaderboard: (limit = 50) => request(`/leaderboard?limit=${limit}`),
+  submitProof: (sessionId, formData) =>
+    requestForm(`/sessions/${sessionId}/proof`, formData),
+  getProofStatus: (sessionId) => request(`/sessions/${sessionId}/proof`),
 }
 
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')

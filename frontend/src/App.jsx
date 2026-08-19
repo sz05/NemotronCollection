@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Box, Button, Stack } from "@mui/material";
 import { api } from "./api/client";
 import ApiKeyModal from "./components/ApiKeyModal";
 import ChatSidebar from "./components/ChatSidebar";
 import ChatView from "./components/ChatView";
 import FeedbackPanel from "./components/FeedbackPanel";
+import LeaderboardModal from "./components/LeaderboardModal";
 import LoginScreen from "./components/LoginScreen";
+import ProofModal from "./components/ProofModal";
+import ScorePanel from "./components/ScorePanel";
+import TaskPicker from "./components/TaskPicker";
 import { useAuth } from "./context/AuthContext";
 import "./App.css";
 
@@ -16,6 +21,10 @@ function App() {
   // True while a feedback question is awaiting an answer; blocks the chat
   // input (backend enforces the same rule with a 409 on /chat).
   const [feedbackPending, setFeedbackPending] = useState(false);
+  const [taskPickerOpen, setTaskPickerOpen] = useState(false);
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+  const [proofOpen, setProofOpen] = useState(false);
+  const scorePanelRef = useRef(null);
 
   useEffect(() => {
     api
@@ -49,8 +58,14 @@ function App() {
     });
   }, [user, refreshSessions]);
 
-  async function handleNewChat() {
-    const data = await api.createSession();
+  // New-chat flow: pick a task first, then create the session for it.
+  function handleNewChat() {
+    setTaskPickerOpen(true);
+  }
+
+  async function handlePickTask(taskId) {
+    setTaskPickerOpen(false);
+    const data = await api.createSession(taskId);
     setActiveSessionId(data.id);
     setFeedbackPending(false);
     await refreshSessions();
@@ -69,9 +84,22 @@ function App() {
       <ApiKeyModal />
       <header className="app-header">
         <h1>Nemotron Harness</h1>
-        <span className={`backend-status backend-status--${backendStatus}`}>
-          backend: {backendStatus}
-        </span>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Button size="small" onClick={() => setLeaderboardOpen(true)}>
+            Leaderboard
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            disabled={!activeSessionId}
+            onClick={() => setProofOpen(true)}
+          >
+            Submit proof
+          </Button>
+          <span className={`backend-status backend-status--${backendStatus}`}>
+            backend: {backendStatus}
+          </span>
+        </Stack>
       </header>
       <main className="app-layout app-layout--with-sidebar">
         <ChatSidebar
@@ -84,12 +112,31 @@ function App() {
           sessionId={activeSessionId}
           feedbackPending={feedbackPending}
           onFirstMessage={refreshSessions}
+          onSent={() => scorePanelRef.current?.refresh()}
         />
-        <FeedbackPanel
-          sessionId={activeSessionId}
-          onPendingChange={setFeedbackPending}
-        />
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <ScorePanel ref={scorePanelRef} sessionId={activeSessionId} />
+          <FeedbackPanel
+            sessionId={activeSessionId}
+            onPendingChange={setFeedbackPending}
+          />
+        </Box>
       </main>
+
+      <TaskPicker
+        open={taskPickerOpen}
+        onClose={() => setTaskPickerOpen(false)}
+        onPick={handlePickTask}
+      />
+      <LeaderboardModal
+        open={leaderboardOpen}
+        onClose={() => setLeaderboardOpen(false)}
+      />
+      <ProofModal
+        open={proofOpen}
+        sessionId={activeSessionId}
+        onClose={() => setProofOpen(false)}
+      />
     </div>
   );
 }

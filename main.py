@@ -7,9 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import init_db
+from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
 from app.routers.chat import router as chat_router
 from app.routers.feedback import router as feedback_router
+from app.routers.leaderboard import router as leaderboard_router
+from app.routers.proof import router as proof_router
+from app.routers.tasks import router as tasks_router
 
 
 @asynccontextmanager
@@ -34,6 +38,10 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(feedback_router)
+app.include_router(tasks_router)
+app.include_router(proof_router)
+app.include_router(leaderboard_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")

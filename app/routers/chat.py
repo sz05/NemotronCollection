@@ -1,7 +1,13 @@
 """Session + chat routes (tasks 2.2, 2.4, 2.6), now user-scoped: every
 route requires the auth cookie, sessions belong to the logged-in user, and
-one user can hold many chats (sidebar lists them via GET /sessions)."""
+one user can hold many chats (sidebar lists them via GET /sessions).
 
+Sessions are started against a Task (DESIGN.md §2). Each /chat turn first runs
+the relevance guardrail (§3.2) before hitting Nemotron, and schedules the
+batched scoring + feedback background job (§3.4) after the reply is returned.
+"""
+
+import asyncio
 import logging
 import uuid
 
@@ -11,37 +17,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.deps import get_current_user
 from app.models import ChatSession, User
-from app.repository import append_turn, create_session, get_chat_session, list_sessions
+from app.repository import (
+    append_turn,
+    create_session,
+    get_chat_session,
+    get_task,
+    list_sessions,
+)
 from app.schemas import (
     ChatRequest,
     ChatResponse,
+    ScoreOut,
+    SessionCreateRequest,
     SessionDetailOut,
     SessionOut,
     SessionSummaryOut,
 )
 from app.services.auth import AuthError, decrypt_api_key
-from app.services.gemini import GeminiError, generate_feedback_question
 from app.services.nemotron import NemotronError, send_chat_message
-from app.state import feedback_connection_manager, feedback_question_store
+from app.services.relevance import evaluate
+from app.services.scoring import score_and_feedback
+from app.state import feedback_question_store
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-
-async def _generate_and_store_feedback_question(session_id: uuid.UUID, messages: list[dict]) -> None:
-    """Task 3.2 payload: runs after the /chat response has been sent, so it
-    never adds latency to the active chat stream."""
-    try:
-        question = await generate_feedback_question(messages)
-    except GeminiError as exc:
-        logger.warning("Gemini feedback question generation failed for %s: %s", session_id, exc)
-        return
-    # Keep the conversation snapshot the question was generated from; it is
-    # persisted onto the feedback_entry row when the user answers.
-    await feedback_question_store.set(session_id, question, context=messages)
-    # Push it straight to any connected side panel -- no client polling.
-    await feedback_connection_manager.push(session_id, question)
+_OFFTOPIC_MESSAGE = (
+    "This doesn't seem closely related to your current task or conversation. "
+    "Are you sure you want to continue?"
+)
 
 
 async def _get_owned_session(
@@ -56,9 +61,13 @@ async def _get_owned_session(
 
 @router.post("/session", response_model=SessionOut)
 async def create_chat_session(
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_session)
+    body: SessionCreateRequest | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
 ) -> SessionOut:
-    session = await create_session(db, user.id)
+    # Body is optional so an unscoped chat (no task) still works.
+    task_id = body.task_id if body else None
+    session = await create_session(db, user.id, task_id=task_id)
     return SessionOut(id=session.id)
 
 
@@ -84,6 +93,22 @@ async def get_chat_session_detail(
         title=session.title,
         messages=session.messages,
         created_at=session.created_at,
+    )
+
+
+@router.get("/sessions/{session_id}/score", response_model=ScoreOut)
+async def get_session_score(
+    session_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> ScoreOut:
+    """Latest live score for the session (§3.4). Refreshed on the scoring
+    background job's 3-4 turn boundary; returns 0 until the first batch."""
+    session = await _get_owned_session(db, session_id, user)
+    return ScoreOut(
+        session_id=session.id,
+        live_score=session.live_score,
+        components=session.score_components or {},
     )
 
 
@@ -122,6 +147,26 @@ async def chat(
             detail="Answer the pending feedback question before sending a new message",
         )
 
+    # Relevance guardrail (§3.2): if the session is scoped to a task and the
+    # user hasn't already acknowledged going off-topic, embed the query and
+    # compare it against the running summary + task. A soft, dismissible
+    # warning is returned WITHOUT calling Nemotron or persisting anything.
+    task_description = ""
+    if session.task_id is not None:
+        task = await get_task(db, session.task_id)
+        task_description = task.description if task else ""
+        if task is not None and not body.acknowledge_offtopic:
+            # evaluate() is CPU-bound (embedding) -- keep it off the event loop.
+            result = await asyncio.to_thread(
+                evaluate, body.message, session.context_summary or "", task.description
+            )
+            if not result.relevant:
+                return ChatResponse(
+                    session_id=session.id,
+                    reply="",
+                    relevance_warning={"score": result.score, "message": _OFFTOPIC_MESSAGE},
+                )
+
     # Task 2.6: the user's turn is NOT persisted yet here -- only sent to
     # Nemotron as part of the wire history. If the call fails, nothing is
     # written, so a retry doesn't resend a malformed history with a
@@ -135,8 +180,11 @@ async def chat(
 
     session = await append_turn(db, body.session_id, body.message, reply)
 
-    # Task 3.2: scheduled to run after this response is returned to the
-    # client -- does not delay the chat reply.
-    background_tasks.add_task(_generate_and_store_feedback_question, session.id, session.messages)
+    # §3.4: batched scoring + feedback, scheduled to run after this response is
+    # returned. It no-ops except on the 3-4 turn boundary, so it neither delays
+    # the chat reply nor fires a Gemini call every turn.
+    background_tasks.add_task(
+        score_and_feedback, session.id, task_description, session.messages
+    )
 
     return ChatResponse(session_id=session.id, reply=reply)

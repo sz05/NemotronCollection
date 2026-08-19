@@ -21,7 +21,7 @@ import websockets
 from sqlalchemy import delete
 
 from app.config import settings
-from app.models import ChatSession
+from app.models import ChatSession, ScoreEvent
 from main import app
 from tests.conftest import TEST_EMAIL
 
@@ -50,17 +50,29 @@ async def live_server():
     await task
 
 
-async def _slow_gemini(_messages: list[dict]) -> str:
+# Batched scoring returns summary + 4 sub-scores + one feedback question in a
+# single call now; the WS push carries that question exactly as before.
+_SCORE_RESULT = {
+    "updated_summary": "The user greeted the assistant.",
+    "scores": {"responsiveness": 50, "elaboration": 50, "development": 50, "progress": 50},
+    "feedback_question": "How helpful was that reply?",
+}
+
+
+async def _slow_gemini(_context: dict) -> dict:
     await asyncio.sleep(GEMINI_DELAY_S)
-    return "How helpful was that reply?"
+    return _SCORE_RESULT
 
 
 async def test_chat_returns_before_gemini_completes_and_ws_pushes_question(
     live_server, db_session
 ):
+    # score_interval_turns=1 so a single turn crosses the scoring boundary.
+    original_interval = settings.score_interval_turns
+    settings.score_interval_turns = 1
     with (
         patch("app.routers.chat.send_chat_message", new=AsyncMock(return_value="hi there")),
-        patch("app.routers.chat.generate_feedback_question", new=_slow_gemini),
+        patch("app.services.scoring.score_and_summarize", new=_slow_gemini),
     ):
         async with httpx.AsyncClient(base_url=live_server) as client:
             token = await _login(client)
@@ -94,6 +106,10 @@ async def test_chat_returns_before_gemini_completes_and_ws_pushes_question(
             fallback = (await client.get(f"/feedback-question/{session_id}")).json()
             assert fallback["question"] == "How helpful was that reply?"
 
+    settings.score_interval_turns = original_interval
+    # score_and_feedback wrote a ScoreEvent (FK to chat_session) -- clear the
+    # child rows before deleting the session.
+    await db_session.execute(delete(ScoreEvent).where(ScoreEvent.session_id == session_id))
     await db_session.execute(delete(ChatSession).where(ChatSession.id == session_id))
     await db_session.commit()
 
@@ -101,9 +117,14 @@ async def test_chat_returns_before_gemini_completes_and_ws_pushes_question(
 async def test_reconnecting_ws_gets_caught_up_with_existing_question(live_server, db_session):
     """A panel that connects *after* a question was already generated (e.g.
     on page reload) should be caught up immediately, not miss it."""
+    original_interval = settings.score_interval_turns
+    settings.score_interval_turns = 1
     with (
         patch("app.routers.chat.send_chat_message", new=AsyncMock(return_value="hi there")),
-        patch("app.routers.chat.generate_feedback_question", new=AsyncMock(return_value="Q?")),
+        patch(
+            "app.services.scoring.score_and_summarize",
+            new=AsyncMock(return_value={**_SCORE_RESULT, "feedback_question": "Q?"}),
+        ),
     ):
         async with httpx.AsyncClient(base_url=live_server) as client:
             token = await _login(client)
@@ -128,5 +149,9 @@ async def test_reconnecting_ws_gets_caught_up_with_existing_question(live_server
                 pushed = json.loads(await asyncio.wait_for(ws.recv(), timeout=2))
                 assert pushed["question"] == "Q?"
 
+    settings.score_interval_turns = original_interval
+    # score_and_feedback wrote a ScoreEvent (FK to chat_session) -- clear the
+    # child rows before deleting the session.
+    await db_session.execute(delete(ScoreEvent).where(ScoreEvent.session_id == session_id))
     await db_session.execute(delete(ChatSession).where(ChatSession.id == session_id))
     await db_session.commit()
