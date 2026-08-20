@@ -97,9 +97,13 @@ async def test_chat_returns_before_gemini_completes_and_ws_pushes_question(
                 )
 
                 # Nothing pushed yet -- background generation is still "running".
-                # Pushed message only arrives once the background task finishes.
-                pushed = await asyncio.wait_for(ws.recv(), timeout=GEMINI_DELAY_S + 2)
-                data = json.loads(pushed)
+                # Pushed messages only arrive once the background task finishes.
+                # The socket is multiplexed: a {type:'score'} frame is pushed
+                # alongside the question, so skip non-question frames.
+                data = {}
+                while "question" not in data:
+                    pushed = await asyncio.wait_for(ws.recv(), timeout=GEMINI_DELAY_S + 2)
+                    data = json.loads(pushed)
                 assert data["question"] == "How helpful was that reply?"
 
             # GET fallback reflects the same state for non-WS clients/tests.

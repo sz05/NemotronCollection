@@ -7,6 +7,7 @@ callers can fail open.
 """
 
 import math
+from functools import lru_cache
 
 from app.config import settings
 
@@ -33,10 +34,21 @@ def _get_model():
         return None
 
 
-def embed(text: str) -> list[float] | None:
-    """Embed text into a float vector, or None if embeddings are unavailable."""
-    if not text or not text.strip():
-        return None
+def warmup() -> bool:
+    """Force the (otherwise lazy) model load + one tiny encode so the FIRST
+    real /chat request doesn't pay the multi-second cold start. Safe to call
+    from app startup; returns True once the model is ready."""
+    model = _get_model()
+    if model is None:
+        return False
+    try:
+        model.encode("warmup", convert_to_numpy=True)
+        return True
+    except Exception:
+        return False
+
+
+def _encode(text: str) -> list[float] | None:
     model = _get_model()
     if model is None:
         return None
@@ -45,6 +57,28 @@ def embed(text: str) -> list[float] | None:
         return [float(x) for x in vec.tolist()]
     except Exception:
         return None
+
+
+@lru_cache(maxsize=1024)
+def _embed_cached(text: str) -> tuple[float, ...] | None:
+    vec = _encode(text)
+    # Cache immutable tuples so a caller can't mutate the shared entry.
+    return tuple(vec) if vec is not None else None
+
+
+def embed(text: str, *, cache: bool = False) -> list[float] | None:
+    """Embed text into a float vector, or None if embeddings are unavailable.
+
+    Pass cache=True for text that repeats across turns (a task description is
+    identical every turn; a running summary changes only every few turns) to
+    reuse the vector instead of re-encoding. Leave it False for the unique
+    per-turn user query."""
+    if not text or not text.strip():
+        return None
+    if cache:
+        cached = _embed_cached(text)
+        return list(cached) if cached is not None else None
+    return _encode(text)
 
 
 def cosine(a: list[float], b: list[float]) -> float:

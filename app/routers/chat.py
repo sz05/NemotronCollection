@@ -23,6 +23,8 @@ from app.repository import (
     get_chat_session,
     get_task,
     list_sessions,
+    user_has_session_for_task,
+    user_total_score,
 )
 from app.schemas import (
     ChatRequest,
@@ -32,6 +34,7 @@ from app.schemas import (
     SessionDetailOut,
     SessionOut,
     SessionSummaryOut,
+    TotalScoreOut,
 )
 from app.services.auth import AuthError, decrypt_api_key
 from app.services.nemotron import NemotronError, send_chat_message
@@ -67,6 +70,13 @@ async def create_chat_session(
 ) -> SessionOut:
     # Body is optional so an unscoped chat (no task) still works.
     task_id = body.task_id if body else None
+    # A task/theme can be locked to only one of the user's chats: once taken,
+    # it can't be picked again for another chat.
+    if task_id is not None and await user_has_session_for_task(db, user.id, task_id):
+        raise HTTPException(
+            status_code=409,
+            detail="You already have a chat for this task -- pick a different one.",
+        )
     session = await create_session(db, user.id, task_id=task_id)
     return SessionOut(id=session.id)
 
@@ -77,8 +87,22 @@ async def list_chat_sessions(
 ) -> list[SessionSummaryOut]:
     sessions = await list_sessions(db, user.id)
     return [
-        SessionSummaryOut(id=s.id, title=s.title, created_at=s.created_at) for s in sessions
+        SessionSummaryOut(
+            id=s.id, title=s.title, created_at=s.created_at, task_id=s.task_id
+        )
+        for s in sessions
     ]
+
+
+@router.get("/score/total", response_model=TotalScoreOut)
+async def get_total_score(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> TotalScoreOut:
+    """The user's cumulative score summed across every chat -- shown live on
+    screen so it reflects all tasks/themes at once, not just the open chat."""
+    total = await user_total_score(db, user.id)
+    return TotalScoreOut(total_score=total)
 
 
 @router.get("/sessions/{session_id}", response_model=SessionDetailOut)
@@ -88,11 +112,16 @@ async def get_chat_session_detail(
     db: AsyncSession = Depends(get_session),
 ) -> SessionDetailOut:
     session = await _get_owned_session(db, session_id, user)
+    theme = None
+    if session.task_id is not None:
+        task = await get_task(db, session.task_id)
+        theme = task.title if task else None
     return SessionDetailOut(
         id=session.id,
         title=session.title,
         messages=session.messages,
         created_at=session.created_at,
+        theme=theme,
     )
 
 

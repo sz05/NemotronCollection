@@ -64,12 +64,23 @@ function App() {
   }
 
   async function handlePickTask(taskId) {
-    setTaskPickerOpen(false);
-    const data = await api.createSession(taskId);
-    setActiveSessionId(data.id);
-    setFeedbackPending(false);
-    await refreshSessions();
+    try {
+      const data = await api.createSession(taskId);
+      setTaskPickerOpen(false);
+      setActiveSessionId(data.id);
+      setFeedbackPending(false);
+      await refreshSessions();
+    } catch (err) {
+      // 409: the task was already locked to another chat (e.g. opened in a
+      // second tab). Refresh so the picker greys it out; keep the dialog open.
+      if (err.status === 409) await refreshSessions();
+      else throw err;
+    }
   }
+
+  // Tasks the user has already locked to a chat -- greyed out in the picker so
+  // the same task can't be taken twice.
+  const usedTaskIds = sessions.map((s) => s.task_id).filter(Boolean);
 
   function handleSelect(sessionId) {
     setActiveSessionId(sessionId);
@@ -127,6 +138,7 @@ function App() {
         open={taskPickerOpen}
         onClose={() => setTaskPickerOpen(false)}
         onPick={handlePickTask}
+        usedTaskIds={usedTaskIds}
       />
       <LeaderboardModal
         open={leaderboardOpen}

@@ -45,25 +45,31 @@ async def score_and_feedback(
         async with async_session_factory() as db:
             session = await get_chat_session(db, session_id)
             prior_summary = session.context_summary if session else ""
+            # live_score is a cumulative running total that only grows: each
+            # batch's score is added to whatever the session already had.
+            prior_total = float(session.live_score) if session else 0.0
 
         context = build_scoring_context(task_description, prior_summary or "", messages)
         result = await score_and_summarize(context)
 
         scores = result["scores"]
-        live = _live_score(scores)
+        batch = _live_score(scores)
+        new_total = round(prior_total + batch, 2)
         # §8.2 guard: only overwrite the summary when the model returned a
         # non-empty one -- a bad summary has downstream blast radius.
         summary = result.get("updated_summary") or prior_summary or ""
         question = (result.get("feedback_question") or "").strip()
 
         async with async_session_factory() as db:
-            await update_session_score(db, session_id, summary, scores, live)
+            # Session holds the cumulative total; the score event keeps the
+            # per-batch delta so the event log stays an accurate audit trail.
+            await update_session_score(db, session_id, summary, scores, new_total)
             await add_score_event(
                 db,
                 session_id,
                 turn_index,
                 {**scores, "context_snapshot": messages},
-                live,
+                batch,
             )
     except GeminiError as exc:
         # Expected, best-effort: keep the prior summary/score, retry next batch.
@@ -72,6 +78,11 @@ async def score_and_feedback(
     except Exception:  # noqa: BLE001 -- a background task must never crash the loop
         logger.exception("Unexpected scoring failure for %s", session_id)
         return
+
+    # Push the cumulative total live so the score badge updates without a
+    # reload. Random (themeless) chats are scored too -- the bonus for
+    # completing and submitting a task is surfaced separately in the UI.
+    await feedback_connection_manager.push_score(session_id, new_total)
 
     if question:
         await feedback_question_store.set(session_id, question, context=messages)

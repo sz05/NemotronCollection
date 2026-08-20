@@ -23,14 +23,22 @@ class Settings(BaseSettings):
     # Nemotron is an OpenAI-compatible chat completions endpoint (NVIDIA NIM /
     # build.nvidia.com). No secret here -- the key travels per-request only.
     nemotron_base_url: str = "https://integrate.api.nvidia.com/v1"
-    # The nano-8B model consistently 502s (gateway timeout) -- its backend
-    # appears unhealthy/deprecated, and meta/llama-4-maverick-17b-128e-instruct
-    # hit end-of-life on 2026-07-27 (API now returns 410 Gone). The 49B super
-    # model is confirmed working end-to-end with the same key. Override via
-    # NEMOTRON_MODEL in .env.
-    nemotron_model: str = "nvidia/llama-3.3-nemotron-super-49b-v1.5"
-    # Caps generation length/latency -- see send_chat_message for why.
-    nemotron_max_tokens: int = 512
+    # Nemotron 3 Super: 120B MoE (12B active), up to 1M-token context, reasoning
+    # on by default -- the model actually in use. If NVIDIA returns a
+    # model-not-found error, try the early-access id
+    # "private/nvidia/nemotron-3-super-120b-a12b". Override via NEMOTRON_MODEL.
+    # (History: nano-8B 502s; llama-4-maverick hit EOL 2026-07-27 -> 410 Gone;
+    # llama-3.3-nemotron-super-49b-v1.5 also worked end-to-end.)
+    nemotron_model: str = "nvidia/nemotron-3-super-120b-a12b"
+    # Caps generation length/latency. This is a *reasoning* model: its output
+    # budget must cover the (often long) chain-of-thought AND the final answer.
+    # At 512 the thinking alone exhausted the budget (finish_reason=length), so
+    # replies were truncated mid-thought and the raw reasoning trace leaked out
+    # as the "reply". Full "code the app file by file" turns easily need several
+    # thousand tokens on top of the thinking, so 8192. Raised together with the
+    # HTTP timeout in nemotron.py -- more tokens means more wall-time. Tune via
+    # NEMOTRON_MAX_TOKENS (the provider's own output cap is the hard ceiling).
+    nemotron_max_tokens: int = 8192
 
     gemini_model: str = "gemini-3.5-flash-lite"
 
@@ -53,7 +61,7 @@ class Settings(BaseSettings):
 
     # --- Semantic relevance + live scoring ---
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    relevance_threshold: float = 0.15
+    relevance_threshold: float = 0.10
     score_interval_turns: int = 4
     window_user_turns: int = 4
     window_llm_turns: int = 4

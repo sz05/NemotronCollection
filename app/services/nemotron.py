@@ -55,7 +55,10 @@ def _post_chat_completions(api_key: str, messages: list[dict]) -> dict:
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=90) as response:
+        # 180s (not 90) to accommodate the larger max_tokens: a reasoning model
+        # writing multi-file code generates for a while. Raise this if you raise
+        # NEMOTRON_MAX_TOKENS further, or big turns will time out mid-answer.
+        with urllib.request.urlopen(request, timeout=180) as response:
             return json.loads(response.read())
     except urllib.error.HTTPError as exc:
         # exc.read() is Nemotron's own error body -- safe to log, no key in it.

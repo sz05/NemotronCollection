@@ -1,6 +1,7 @@
-"""Leaderboard route: ranks users by total awarded points, with the caller's
-own rank surfaced separately (.me) so the frontend can highlight it even when
-the caller is off the visible page."""
+"""Leaderboard route: ranks users by total score (chat live_score + bonus
+points from verified task proofs), with the caller's own rank surfaced
+separately (.me) so the frontend can highlight it even when the caller is off
+the visible page."""
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,8 +31,9 @@ async def get_leaderboard(
                 user_id=row["user_id"],
                 display_name=row["display_name"],
                 total_points=row["total_points"],
+                chat_score=row["chat_score"],
+                bonus_points=row["bonus_points"],
                 tasks_completed=row["tasks_completed"],
-                avg_live_score=row["avg_live_score"],
             )
         )
 

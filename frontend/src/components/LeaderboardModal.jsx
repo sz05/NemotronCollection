@@ -17,8 +17,8 @@ import {
 import { api } from '../api/client'
 
 // Non-blocking leaderboard dialog. Fetches api.getLeaderboard() when opened and
-// highlights the caller's own row (response.me). Ranked, points, tasks
-// completed, and average live score per user.
+// highlights the caller's own row (response.me). Shows only the total score
+// (chat score + bonus points from verified tasks); breakdown is not displayed.
 function LeaderboardModal({ open, onClose }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -51,9 +51,7 @@ function LeaderboardModal({ open, onClose }) {
                 <TableRow>
                   <TableCell>#</TableCell>
                   <TableCell>Player</TableCell>
-                  <TableCell align="right">Points</TableCell>
-                  <TableCell align="right">Tasks</TableCell>
-                  <TableCell align="right">Avg live score</TableCell>
+                  <TableCell align="right">Total score</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -70,16 +68,12 @@ function LeaderboardModal({ open, onClose }) {
                         {isMe ? ' (you)' : ''}
                       </TableCell>
                       <TableCell align="right">{e.total_points}</TableCell>
-                      <TableCell align="right">{e.tasks_completed}</TableCell>
-                      <TableCell align="right">
-                        {Number(e.avg_live_score ?? 0).toFixed(1)}
-                      </TableCell>
                     </TableRow>
                   )
                 })}
                 {entries.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5}>
+                    <TableCell colSpan={3}>
                       <Typography color="text.secondary">No entries yet.</Typography>
                     </TableCell>
                   </TableRow>

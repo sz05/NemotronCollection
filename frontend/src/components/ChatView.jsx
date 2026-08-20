@@ -27,6 +27,8 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
   // user message restored) only in that chat, never the one on screen.
   const [pending, setPending] = useState(null)
   const [error, setError] = useState(null)
+  // The task/theme locked to this chat (null for a free chat), shown on top.
+  const [theme, setTheme] = useState(null)
 
   const activeSessionRef = useRef(sessionId)
   activeSessionRef.current = sessionId
@@ -37,6 +39,7 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
   useEffect(() => {
     setMessages([])
     setError(null)
+    setTheme(null)
     if (!sessionId) return
     let cancelled = false
     setLoading(true)
@@ -44,6 +47,7 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
       .getSession(sessionId)
       .then((data) => {
         if (cancelled) return
+        setTheme(data.theme ?? null)
         let history = data.messages
         // Coming back to a chat whose turn is still in flight: the user
         // message isn't persisted until Nemotron replies, so re-add the
@@ -141,7 +145,28 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
 
   return (
     <section className="chat-view">
-      <h2>Chat</h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <h2 style={{ margin: 0 }}>Chat</h2>
+        {theme ? (
+          <span
+            title="This chat's locked theme"
+            style={{
+              padding: '2px 10px',
+              borderRadius: 999,
+              background: '#e8f0fe',
+              color: '#1a56db',
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            🎯 {theme}
+          </span>
+        ) : (
+          sessionId && (
+            <span style={{ color: '#888', fontSize: 13 }}>Free chat</span>
+          )
+        )}
+      </div>
       <div className="chat-messages">
         {loading && <p className="chat-loading">Loading history...</p>}
         {messages.map((m, i) => (

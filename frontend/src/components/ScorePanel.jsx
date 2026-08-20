@@ -1,88 +1,79 @@
 import { useCallback, useEffect, useImperativeHandle, forwardRef, useState } from 'react'
-import { Box, LinearProgress, Paper, Stack, Typography } from '@mui/material'
-import { api } from '../api/client'
+import { Paper, Stack, Typography } from '@mui/material'
+import { api, WS_BASE_URL } from '../api/client'
 
-const COMPONENT_LABELS = {
-  responsiveness: 'Responsiveness',
-  elaboration: 'Elaboration',
-  development: 'Development',
-  progress: 'Progress',
-}
-
-// Live score panel: shows the session live_score plus the R/E/D/P breakdown.
-// Fetches api.getScore(sessionId) on session change; the parent can trigger a
-// refetch after each sent message via the imperative `refresh()` handle.
+// Total score panel: shows the user's cumulative score summed across ALL of
+// their chats (GET /score/total), not just the open one. Each chat's own
+// live_score grows every few turns; the total is the sum of them all.
+//
+// Kept live without a reload: the active chat's socket
+// (/ws/feedback/{sessionId}) pushes a {type:'score'} frame whenever that chat
+// re-scores, and we re-fetch the total in response (the pushed value is only
+// one chat's contribution, so a refetch is the correct way to fold it into the
+// cross-chat sum). We also refetch on session switch and via refresh().
 const ScorePanel = forwardRef(function ScorePanel({ sessionId }, ref) {
-  const [score, setScore] = useState(null)
+  const [total, setTotal] = useState(null)
   const [error, setError] = useState(null)
 
-  const load = useCallback(() => {
-    if (!sessionId) {
-      setScore(null)
-      return
-    }
+  const loadTotal = useCallback(() => {
     api
-      .getScore(sessionId)
+      .getTotalScore()
       .then((data) => {
-        setScore(data)
+        setTotal(Number(data.total_score ?? 0))
         setError(null)
       })
       .catch((err) => setError(err.message))
-  }, [sessionId])
+  }, [])
 
+  // Refetch on mount and whenever the active chat changes.
   useEffect(() => {
-    load()
-  }, [load])
+    loadTotal()
+  }, [loadTotal, sessionId])
 
-  useImperativeHandle(ref, () => ({ refresh: load }), [load])
+  useImperativeHandle(ref, () => ({ refresh: loadTotal }), [loadTotal])
 
-  if (!sessionId) return null
+  // Live push over the active chat's feedback socket. Score frames are
+  // {type:'score'}; on one, refetch the cross-chat total.
+  useEffect(() => {
+    if (!sessionId) return
+    const ws = new WebSocket(`${WS_BASE_URL}/ws/feedback/${sessionId}`)
+    ws.onmessage = (event) => {
+      let data
+      try {
+        data = JSON.parse(event.data)
+      } catch {
+        return
+      }
+      if (data.type === 'score') {
+        loadTotal()
+      }
+    }
+    return () => ws.close()
+  }, [sessionId, loadTotal])
 
-  const live = Math.max(0, Math.min(100, score?.live_score ?? 0))
-  const components = score?.components ?? {}
+  if (total === null) return null
+
+  const shown = Math.max(0, Math.round(total))
 
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Typography variant="subtitle1" gutterBottom>
-        Live score
+        Total score
       </Typography>
       {error && (
         <Typography variant="body2" color="error">
           {error}
         </Typography>
       )}
-      <Box sx={{ mb: 2 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="baseline">
-          <Typography variant="h5">{Math.round(live)}</Typography>
-          <Typography variant="caption" color="text.secondary">
-            / 100
-          </Typography>
-        </Stack>
-        <LinearProgress variant="determinate" value={live} sx={{ mt: 0.5, height: 8, borderRadius: 4 }} />
-      </Box>
-      <Stack spacing={1.25}>
-        {Object.entries(COMPONENT_LABELS).map(([key, label]) => {
-          const val = Math.max(0, Math.min(100, Number(components[key] ?? 0)))
-          return (
-            <Box key={key}>
-              <Stack direction="row" justifyContent="space-between">
-                <Typography variant="caption" color="text.secondary">
-                  {label}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {Math.round(val)}
-                </Typography>
-              </Stack>
-              <LinearProgress
-                variant="determinate"
-                value={val}
-                color="secondary"
-                sx={{ mt: 0.25, height: 6, borderRadius: 3 }}
-              />
-            </Box>
-          )
-        })}
+      <Stack direction="row" spacing={1} alignItems="baseline">
+        <Typography variant="h4">{shown}</Typography>
+        <Typography variant="caption" color="text.secondary">
+          points · across all your chats
+        </Typography>
       </Stack>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+        Complete a task and submit proof for bonus points.
+      </Typography>
     </Paper>
   )
 })

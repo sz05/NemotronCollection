@@ -16,6 +16,9 @@ class SessionSummaryOut(BaseModel):
     id: uuid.UUID
     title: str
     created_at: datetime
+    # The task locked to this chat, if any -- lets the picker grey out tasks
+    # the user has already taken.
+    task_id: uuid.UUID | None = None
 
 
 class SessionDetailOut(BaseModel):
@@ -23,6 +26,8 @@ class SessionDetailOut(BaseModel):
     title: str
     messages: list
     created_at: datetime
+    # The locked task's title (the chat's "theme"), or None for a free chat.
+    theme: str | None = None
 
 
 class GoogleLoginRequest(BaseModel):
@@ -113,6 +118,12 @@ class ScoreOut(BaseModel):
     components: dict
 
 
+class TotalScoreOut(BaseModel):
+    """The user's cumulative score summed across all of their chats."""
+
+    total_score: float
+
+
 # --- Proof submissions ---
 class ProofOut(BaseModel):
     id: uuid.UUID
@@ -126,9 +137,11 @@ class LeaderboardEntryOut(BaseModel):
     rank: int
     user_id: uuid.UUID
     display_name: str
+    # total_points = rounded chat_score + bonus_points (the ranking key).
     total_points: int
+    chat_score: float
+    bonus_points: int
     tasks_completed: int
-    avg_live_score: float
 
 
 class LeaderboardOut(BaseModel):

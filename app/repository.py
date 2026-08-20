@@ -80,6 +80,30 @@ async def list_sessions(db: AsyncSession, user_id: uuid.UUID) -> list[ChatSessio
     return list(result.scalars().all())
 
 
+async def user_has_session_for_task(
+    db: AsyncSession, user_id: uuid.UUID, task_id: uuid.UUID
+) -> bool:
+    """A task/theme can be locked to at most one of a user's chats: True if
+    this user already started a chat for this task."""
+    result = await db.execute(
+        select(ChatSession.id).where(
+            ChatSession.user_id == user_id, ChatSession.task_id == task_id
+        )
+    )
+    return result.first() is not None
+
+
+async def user_total_score(db: AsyncSession, user_id: uuid.UUID) -> float:
+    """Sum of the cumulative live_score across all of the user's chats -- the
+    total shown on screen while they chat."""
+    result = await db.execute(
+        select(func.coalesce(func.sum(ChatSession.live_score), 0.0)).where(
+            ChatSession.user_id == user_id
+        )
+    )
+    return float(result.scalar_one())
+
+
 async def append_message(db: AsyncSession, session_id: uuid.UUID, role: str, content: str) -> ChatSession:
     session = await db.get(ChatSession, session_id)
     if session is None:
@@ -325,40 +349,55 @@ async def award_points(
 
 
 async def leaderboard(db: AsyncSession, limit: int = 50) -> list[dict]:
-    # Total points + tasks completed per user from PointAward.
+    """Rank users by total score = summed chat live_score across their chats
+    PLUS bonus points awarded for verified task proofs. Everyone with any chat
+    activity appears (not just award-holders); completing + getting a task
+    verified adds bonus points that push them higher."""
+    # Chat score per user: sum of the cumulative live_score across their chats.
+    chat_stmt = (
+        select(
+            ChatSession.user_id.label("user_id"),
+            func.coalesce(func.sum(ChatSession.live_score), 0.0).label("chat_score"),
+        )
+        .group_by(ChatSession.user_id)
+    )
+    chat_map = {r.user_id: float(r.chat_score) for r in (await db.execute(chat_stmt)).all()}
+
+    # Bonus points + tasks completed per user from verified proofs (PointAward).
     points_stmt = (
         select(
             PointAward.user_id.label("user_id"),
-            func.coalesce(func.sum(PointAward.points), 0).label("total_points"),
+            func.coalesce(func.sum(PointAward.points), 0).label("bonus_points"),
             func.count(PointAward.task_id).label("tasks_completed"),
         )
         .group_by(PointAward.user_id)
     )
-    points_rows = (await db.execute(points_stmt)).all()
-
-    # Average live score per user across their sessions.
-    avg_stmt = (
-        select(
-            ChatSession.user_id.label("user_id"),
-            func.coalesce(func.avg(ChatSession.live_score), 0.0).label("avg_live_score"),
-        )
-        .group_by(ChatSession.user_id)
-    )
-    avg_map = {r.user_id: float(r.avg_live_score) for r in (await db.execute(avg_stmt)).all()}
+    points_map = {
+        r.user_id: (int(r.bonus_points), int(r.tasks_completed))
+        for r in (await db.execute(points_stmt)).all()
+    }
 
     # Display names.
     users = (await db.execute(select(User))).scalars().all()
     name_map = {u.id: (u.display_name or u.name or u.email) for u in users}
 
-    entries = [
-        {
-            "user_id": r.user_id,
-            "display_name": name_map.get(r.user_id, ""),
-            "total_points": int(r.total_points),
-            "tasks_completed": int(r.tasks_completed),
-            "avg_live_score": avg_map.get(r.user_id, 0.0),
-        }
-        for r in points_rows
-    ]
-    entries.sort(key=lambda e: (e["total_points"], e["avg_live_score"]), reverse=True)
+    # Everyone with chat activity or awarded points is on the board.
+    user_ids = set(chat_map) | set(points_map)
+    entries = []
+    for uid in user_ids:
+        chat_score = chat_map.get(uid, 0.0)
+        bonus_points, tasks_completed = points_map.get(uid, (0, 0))
+        entries.append(
+            {
+                "user_id": uid,
+                "display_name": name_map.get(uid, ""),
+                # Total is the ranking key: rounded chat score + bonus points.
+                "total_points": round(chat_score) + bonus_points,
+                "chat_score": round(chat_score, 1),
+                "bonus_points": bonus_points,
+                "tasks_completed": tasks_completed,
+            }
+        )
+    # Rank by total, then bonus (verified tasks break ties upward).
+    entries.sort(key=lambda e: (e["total_points"], e["bonus_points"]), reverse=True)
     return entries[:limit]

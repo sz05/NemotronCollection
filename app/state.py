@@ -76,6 +76,19 @@ class FeedbackConnectionManager:
                 # own receive loop hitting WebSocketDisconnect.
                 pass
 
+    async def push_score(self, session_id: uuid.UUID, value: float) -> None:
+        """Broadcast the cumulative live score over the same per-session
+        sockets. Typed ({"type": "score"}) so the feedback panel, which only
+        acts on {"question": ...}, ignores it and a score listener can filter
+        for it. Same best-effort semantics as push()."""
+        async with self._lock:
+            sockets = list(self._connections.get(session_id, []))
+        for socket in sockets:
+            try:
+                await socket.send_json({"type": "score", "value": value})
+            except Exception:
+                pass
+
 
 feedback_question_store = FeedbackQuestionStore()
 feedback_connection_manager = FeedbackConnectionManager()

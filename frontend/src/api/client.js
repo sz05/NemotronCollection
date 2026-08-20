@@ -106,6 +106,7 @@ export const api = {
   // --- tasks / scoring / proof / leaderboard ---
   getTasks: () => request('/tasks'),
   getScore: (sessionId) => request(`/sessions/${sessionId}/score`),
+  getTotalScore: () => request('/score/total'),
   getLeaderboard: (limit = 50) => request(`/leaderboard?limit=${limit}`),
   submitProof: (sessionId, formData) =>
     requestForm(`/sessions/${sessionId}/proof`, formData),

@@ -15,10 +15,12 @@ import {
 } from '@mui/material'
 import { api } from '../api/client'
 
-// Dialog shown by the App new-chat flow: the user picks an active task
-// before a session is created (createSession(taskId)). Picking "No task /
-// free chat" creates a task-less session (taskId=null).
-function TaskPicker({ open, onClose, onPick }) {
+// Dialog shown by the App new-chat flow: the user either locks a task/theme to
+// the chat (createSession(taskId) -- the relevance guardrail then runs against
+// it) or picks "Just talk" for a task-less session (taskId=null, no guardrail).
+// Both are scored; only a locked task is eligible for the completion bonus.
+function TaskPicker({ open, onClose, onPick, usedTaskIds = [] }) {
+  const usedIds = new Set(usedTaskIds)
   const [tasks, setTasks] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -53,28 +55,33 @@ function TaskPicker({ open, onClose, onPick }) {
               onClick={() => setSelectedId(null)}
             >
               <ListItemText
-                primary="No task / free chat"
-                secondary="Chat without a scored task"
+                primary="Just talk about something random"
+                secondary="Still scored, but no task locked — pick a task instead to earn a completion bonus"
               />
             </ListItemButton>
-            {tasks.map((t) => (
-              <ListItemButton
-                key={t.id}
-                selected={selectedId === t.id}
-                onClick={() => setSelectedId(t.id)}
-              >
-                <ListItemText
-                  primary={
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      <span>{t.title}</span>
-                      <Chip size="small" label={t.difficulty} />
-                      <Chip size="small" variant="outlined" label={`${t.base_points} pts`} />
-                    </Stack>
-                  }
-                  secondary={t.description}
-                />
-              </ListItemButton>
-            ))}
+            {tasks.map((t) => {
+              const taken = usedIds.has(t.id)
+              return (
+                <ListItemButton
+                  key={t.id}
+                  selected={selectedId === t.id}
+                  disabled={taken}
+                  onClick={() => setSelectedId(t.id)}
+                >
+                  <ListItemText
+                    primary={
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <span>{t.title}</span>
+                        <Chip size="small" label={t.difficulty} />
+                        <Chip size="small" variant="outlined" label={`${t.base_points} pts`} />
+                        {taken && <Chip size="small" color="default" label="In use" />}
+                      </Stack>
+                    }
+                    secondary={taken ? 'Already locked to one of your chats' : t.description}
+                  />
+                </ListItemButton>
+              )
+            })}
             {tasks.length === 0 && (
               <Typography color="text.secondary" sx={{ px: 2, py: 1 }}>
                 No active tasks available.

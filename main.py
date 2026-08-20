@@ -1,5 +1,6 @@
 """FastAPI app entrypoint (task 0.2). CORS wiring is task 0.6."""
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import init_db
+from app.services.embeddings import warmup as warmup_embeddings
 from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
 from app.routers.chat import router as chat_router
@@ -19,7 +21,15 @@ from app.routers.tasks import router as tasks_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    yield
+    # Warm the embedding model off the request path so the first /chat doesn't
+    # pay the multi-second cold start. Fire-and-forget in a thread so startup
+    # (and health checks) return immediately; a request arriving mid-warmup
+    # still works -- it just falls back to the lazy load once.
+    warm_task = asyncio.create_task(asyncio.to_thread(warmup_embeddings))
+    try:
+        yield
+    finally:
+        warm_task.cancel()
 
 
 app = FastAPI(title="Synthetic Data Collection Harness", lifespan=lifespan)
