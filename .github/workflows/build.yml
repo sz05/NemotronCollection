@@ -1,0 +1,59 @@
+name: Build and push image
+
+# Matches junior-deploy-guide.md Step 4-5: build on GitHub (not on the deploy
+# server), push to GHCR, let Coolify pull the finished image. No secrets
+# needed here -- GITHUB_TOKEN is provided automatically and is scoped to
+# just this repo's package.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # :latest for Coolify to track, plus the commit SHA so a bad deploy can
+      # be rolled back to a specific tag (see "Rolling back" in the guide).
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Cache across runs so the torch/sentence-transformers layer (the
+          # slow part of this Dockerfile) doesn't rebuild from scratch every
+          # push -- only requirements.txt or the model id changing busts it.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
