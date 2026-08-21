@@ -226,37 +226,6 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
             <span style={{ color: '#9b9ca3', fontSize: 12.5 }}>Free chat</span>
           )
         )}
-        {sessionId && (
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-            {submitResult != null && (
-              <span style={{ color: '#8ee6a1', fontSize: 13, fontWeight: 600 }}>
-                You scored {submitResult}/100
-              </span>
-            )}
-            {submitError && (
-              <span style={{ color: '#ff6b6b', fontSize: 12.5 }}>{submitError}</span>
-            )}
-            {/* title lives on the span so the tooltip shows even when the button
-                is disabled (disabled buttons don't fire hover in most browsers). */}
-            <span
-              title={
-                submitStatus?.can_submit
-                  ? 'Score this chat'
-                  : 'Keep chatting to unlock — explore more, then submit'
-              }
-              style={{ display: 'inline-flex' }}
-            >
-              <button
-                type="button"
-                className="submit-chat-btn"
-                onClick={handleSubmitChat}
-                disabled={!submitStatus?.can_submit || submitting}
-              >
-                {submitting ? 'Scoring…' : 'Submit chat'}
-              </button>
-            </span>
-          </div>
-        )}
       </div>
       <div className="chat-messages">
         {loading && <p className="chat-loading">Loading history...</p>}
@@ -294,6 +263,29 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
           {pending ? 'Sending...' : 'Send'}
         </button>
       </form>
+      {sessionId && (
+        <div className="submit-chat-bar">
+          <button
+            type="button"
+            className="submit-chat-btn"
+            onClick={handleSubmitChat}
+            disabled={!submitStatus?.can_submit || submitting}
+          >
+            {submitting ? 'Scoring…' : 'Submit chat for scoring'}
+          </button>
+          {submitResult != null && (
+            <p className="submit-chat-result">
+              You scored <strong>{submitResult}</strong>/100
+            </p>
+          )}
+          {submitError && <p className="submit-chat-error">{submitError}</p>}
+          {!submitStatus?.can_submit && !submitting && submitResult == null && (
+            <p className="submit-chat-hint">
+              🔒 Keep chatting to unlock — explore the theme more, then submit.
+            </p>
+          )}
+        </div>
+      )}
       <RelevanceWarningModal
         open={Boolean(relevanceWarning)}
         warning={relevanceWarning?.warning}

@@ -341,6 +341,71 @@
   cursor: not-allowed;
 }
 
+/* Submit-chat call-to-action, sits under the composer (below Send) */
+.submit-chat-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.submit-chat-btn {
+  width: 100%;
+  padding: 0.85rem 1.1rem;
+  border: none;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 1.02rem;
+  letter-spacing: 0.01em;
+  color: #06210f;
+  cursor: pointer;
+  background: linear-gradient(180deg, #3ad37f 0%, #22b866 100%);
+  box-shadow: 0 2px 12px rgba(34, 184, 102, 0.28);
+  transition: filter 0.12s, transform 0.06s, background 0.15s, box-shadow 0.15s;
+}
+
+.submit-chat-btn:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+
+.submit-chat-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.submit-chat-btn:disabled {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.submit-chat-hint {
+  margin: 0;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+.submit-chat-result {
+  margin: 0;
+  text-align: center;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #8ee6a1;
+}
+
+.submit-chat-result strong {
+  font-size: 1.2rem;
+}
+
+.submit-chat-error {
+  margin: 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: #ff6b6b;
+}
+
 /* Chat bubbles */
 
 .chat-message {
