@@ -182,8 +182,18 @@ function Submissions({ open }) {
               </Button>
             )}
             {p.url && (
-              <Link href={p.url} target="_blank" rel="noopener noreferrer" variant="body2">
-                Open link ↗
+              // Show the full URL as inspectable text (not a bare "Open link"
+              // button) so the reviewer can see where a participant-supplied
+              // link goes before clicking it.
+              <Link
+                href={p.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="body2"
+                title={p.url}
+                sx={{ wordBreak: 'break-all' }}
+              >
+                {p.url} ↗
               </Link>
             )}
           </Stack>
