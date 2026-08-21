@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: harness
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d harness"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Left empty by default -- same-origin relative fetches, works no
+        # matter what hostname/port you browse to. Only set this if the
+        # frontend needs to call a backend on a different origin.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/harness
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
+      # Must match the host-side port in the `ports:` mapping below --
+      # uvicorn listens on $PORT (Dockerfile defaults it to 8000).
+      PORT: "5173"
+      JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in .env -- generate one with python -c 'import secrets; print(secrets.token_urlsafe(48))'}"
+      DEV_AUTH: ${DEV_AUTH:-false}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      PROOF_UPLOAD_DIR: /app/uploads
+      # These are safe to pass through empty -- app/config.py's own defaults
+      # for them are already "" (feature stays off/hidden until you set one).
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      API_KEY_ENC_SECRET: ${API_KEY_ENC_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      # NOT passed through empty on purpose: GEMINI_MODEL, NEMOTRON_MODEL,
+      # NEMOTRON_BASE_URL, and NEMOTRON_MAX_TOKENS have real non-empty
+      # defaults baked into the image via app/config.py. An empty string
+      # would silently stomp the model/URL defaults (str fields) or crash
+      # Settings outright (nemotron_max_tokens is an int). Uncomment and set
+      # only if you actually want to override one:
+      # GEMINI_MODEL: gemini-3.5-flash-lite
+      # NEMOTRON_MODEL: nvidia/nemotron-3-super-120b-a12b
+      # NEMOTRON_BASE_URL: https://integrate.api.nvidia.com/v1
+      # NEMOTRON_MAX_TOKENS: "8192"
+    volumes:
+      - uploads:/app/uploads
+    ports:
+      - "5173:5173"
+
+volumes:
+  pg_data:
+  uploads:

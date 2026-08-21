@@ -4,9 +4,12 @@
 // per-request header override is still supported.
 
 // Prepend https:// if the env var was set without a scheme — a bare host is
-// otherwise fetched as a path relative to the current page.
+// otherwise fetched as a path relative to the current page. Unset entirely
+// (the combined-image default) means "same origin as this page" -- a plain
+// '' base so fetches resolve relative to wherever the app is actually being
+// served from, regardless of hostname/port/protocol.
 function normalizeBaseUrl(url) {
-  if (!url) return 'http://localhost:8000'
+  if (!url) return ''
   const trimmed = url.replace(/\/+$/, '')
   return /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`
 }

@@ -3,10 +3,12 @@
 import asyncio
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.db import init_db
@@ -82,3 +84,13 @@ app.include_router(admin_router)
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+# Combined-image deployment: the Dockerfile builds the frontend and copies its
+# dist output to app/static. Mounted last (and only if present) so it never
+# shadows the API routes above -- Starlette matches routes in registration
+# order, and this Mount only catches paths nothing earlier claimed.
+# html=True serves index.html for unknown paths (client-side routing support).
+_frontend_dist = Path(__file__).parent / "static"
+if _frontend_dist.is_dir():
+    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend")
