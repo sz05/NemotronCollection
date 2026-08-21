@@ -159,6 +159,20 @@ async def session_best_score(db: AsyncSession, session_id: uuid.UUID) -> int | N
     return int(val) if val is not None else None
 
 
+async def session_best_points(db: AsyncSession, session_id: uuid.UUID) -> int | None:
+    """The highest POINTS this chat has earned (its contribution to the total),
+    or None if never submitted. Points scale by theme difficulty, unlike the
+    raw 0-100 score."""
+    val = (
+        await db.execute(
+            select(func.max(ChatSubmission.points)).where(
+                ChatSubmission.session_id == session_id
+            )
+        )
+    ).scalar_one()
+    return int(val) if val is not None else None
+
+
 async def session_has_pending_proof(db: AsyncSession, session_id: uuid.UUID) -> bool:
     """True if this chat already has a proof awaiting review -- used to block a
     second submission until the first is graded or rejected."""

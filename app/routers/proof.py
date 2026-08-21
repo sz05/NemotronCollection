@@ -27,6 +27,7 @@ from app.repository import (
     create_chat_submission,
     get_chat_session,
     get_task,
+    session_best_points,
     session_best_score,
     user_total_score,
 )
@@ -72,8 +73,11 @@ async def submit_status(
     count = len(_user_messages(session.messages))
     done = await count_session_submissions(db, session.id)
     threshold = _next_threshold(session.id, done)
-    best = await session_best_score(db, session.id)
-    return SubmitStatusOut(can_submit=count >= threshold, best_score=best)
+    return SubmitStatusOut(
+        can_submit=count >= threshold,
+        best_score=await session_best_score(db, session.id),
+        best_points=await session_best_points(db, session.id),
+    )
 
 
 @router.post("/sessions/{session_id}/submit", response_model=SubmitOut)

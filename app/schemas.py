@@ -142,8 +142,11 @@ class SubmitStatusOut(BaseModel):
     messages are needed -- the UI shows a generic 'keep chatting' nudge."""
 
     can_submit: bool
-    # Highest score already earned in this chat (None if never submitted).
+    # Highest raw 0-100 score in this chat (None if never submitted).
     best_score: int | None = None
+    # Highest POINTS this chat has earned -- what actually counts toward the
+    # total (score scaled by theme difficulty). This is what the UI shows.
+    best_points: int | None = None
 
 
 # --- Proof submissions ---

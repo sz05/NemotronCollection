@@ -14,8 +14,9 @@ import { api, WS_BASE_URL } from '../api/client'
 const ScorePanel = forwardRef(function ScorePanel({ sessionId }, ref) {
   const [total, setTotal] = useState(null)
   const [error, setError] = useState(null)
-  // Best (highest) score submitted for the ACTIVE chat -- null if never scored.
-  const [bestScore, setBestScore] = useState(null)
+  // Best (highest) POINTS earned in the ACTIVE chat -- null if never scored.
+  // Points (not the raw 0-100 score) so it lines up with the total.
+  const [bestPoints, setBestPoints] = useState(null)
 
   const loadTotal = useCallback(() => {
     api
@@ -29,12 +30,12 @@ const ScorePanel = forwardRef(function ScorePanel({ sessionId }, ref) {
 
   const loadBest = useCallback((sid) => {
     if (!sid) {
-      setBestScore(null)
+      setBestPoints(null)
       return
     }
     api
       .getSubmitStatus(sid)
-      .then((d) => setBestScore(d.best_score ?? null))
+      .then((d) => setBestPoints(d.best_points ?? null))
       .catch(() => {})
   }, [])
 
@@ -109,10 +110,10 @@ const ScorePanel = forwardRef(function ScorePanel({ sessionId }, ref) {
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, mt: 0.25 }}>
             <Typography sx={{ fontSize: '1.7rem', lineHeight: 1, fontWeight: 700, letterSpacing: '-0.02em' }}>
-              {bestScore != null ? bestScore : '—'}
+              {bestPoints != null ? bestPoints : '—'}
             </Typography>
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              {bestScore != null ? '/ 100' : 'not scored yet'}
+              {bestPoints != null ? 'pts' : 'not scored yet'}
             </Typography>
           </Box>
         </Box>

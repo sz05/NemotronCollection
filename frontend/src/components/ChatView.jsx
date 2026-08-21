@@ -97,7 +97,9 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
     try {
       const res = await api.submitChat(sid)
       if (activeSessionRef.current !== sid) return
-      setSubmitResult(res.score) // show ONLY the score, no rationale
+      // Show POINTS (what actually moves the total) + the new total -- not the
+      // raw 0-100 score, which reads as a discrepancy against the points total.
+      setSubmitResult({ points: res.points, total: res.total_score })
       onSent?.(sid) // nudge ScorePanel to refetch the total
       fetchSubmitStatus(sid) // re-lock until the next threshold
     } catch (err) {
@@ -275,7 +277,8 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
           </button>
           {submitResult != null && (
             <p className="submit-chat-result">
-              You scored <strong>{submitResult}</strong>/100
+              You earned <strong>{submitResult.points}</strong> pts · Total:{' '}
+              <strong>{submitResult.total}</strong>
             </p>
           )}
           {submitError && <p className="submit-chat-error">{submitError}</p>}
