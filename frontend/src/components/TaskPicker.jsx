@@ -19,7 +19,7 @@ import { api } from '../api/client'
 // the chat (createSession(taskId) -- the relevance guardrail then runs against
 // it) or picks "Just talk" for a task-less session (taskId=null, no guardrail).
 // Both are scored; only a locked task is eligible for the completion bonus.
-function TaskPicker({ open, onClose, onPick, usedTaskIds = [] }) {
+function TaskPicker({ open, onClose, onPick, usedTaskIds = [], dismissable = true }) {
   const usedIds = new Set(usedTaskIds)
   const [tasks, setTasks] = useState([])
   const [selectedId, setSelectedId] = useState(null)
@@ -43,8 +43,16 @@ function TaskPicker({ open, onClose, onPick, usedTaskIds = [] }) {
   }
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>Start a new chat</DialogTitle>
+    <Dialog
+      open={open}
+      onClose={(_e, _reason) => dismissable && onClose?.()}
+      disableEscapeKeyDown={!dismissable}
+      fullWidth
+      maxWidth="sm"
+    >
+      <DialogTitle>
+        {dismissable ? 'Start a new chat' : 'Pick a task to start'}
+      </DialogTitle>
       <DialogContent dividers>
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
         {loading && <Typography color="text.secondary">Loading tasks...</Typography>}
@@ -91,7 +99,7 @@ function TaskPicker({ open, onClose, onPick, usedTaskIds = [] }) {
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
+        {dismissable && <Button onClick={onClose}>Cancel</Button>}
         <Button variant="contained" onClick={handleStart} disabled={loading}>
           Start chat
         </Button>

@@ -53,10 +53,10 @@ function App() {
       if (list.length > 0) {
         setActiveSessionId(list[0].id);
       } else {
-        api.createSession().then((data) => {
-          setActiveSessionId(data.id);
-          return refreshSessions();
-        });
+        // First-time user with no chats yet: prompt for a task instead of
+        // silently creating an unscoped chat, so the very first chat is
+        // task-scoped like every subsequent one (created via handlePickTask).
+        setTaskPickerOpen(true);
       }
     });
   }, [user, refreshSessions]);
@@ -155,6 +155,7 @@ function App() {
         onClose={() => setTaskPickerOpen(false)}
         onPick={handlePickTask}
         usedTaskIds={usedTaskIds}
+        dismissable={sessions.length > 0}
       />
       <LeaderboardModal
         open={leaderboardOpen}
