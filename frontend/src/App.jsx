@@ -52,10 +52,13 @@ function App() {
       setSessions(list);
       if (list.length > 0) {
         setActiveSessionId(list[0].id);
-      } else {
+      } else if (user.has_nemotron_key) {
         // First-time user with no chats yet: prompt for a task instead of
         // silently creating an unscoped chat, so the very first chat is
         // task-scoped like every subsequent one (created via handlePickTask).
+        // Gate on the API key so this doesn't stack on top of the mandatory
+        // key modal -- saving the key updates `user`, re-running this effect
+        // to open the picker then.
         setTaskPickerOpen(true);
       }
     });
