@@ -8,13 +8,15 @@ batched scoring + feedback background job (§3.4) after the reply is returned.
 """
 
 import asyncio
+import json
 import logging
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_session
+from app.db import async_session_factory, get_session
 from app.deps import get_current_user
 from app.models import ChatSession, User
 from app.repository import (
@@ -37,7 +39,7 @@ from app.schemas import (
     TotalScoreOut,
 )
 from app.services.auth import AuthError, decrypt_api_key
-from app.services.nemotron import NemotronError, send_chat_message
+from app.services.nemotron import NemotronError, send_chat_message, stream_chat_message
 from app.services.relevance import evaluate
 from app.services.scoring import score_and_feedback
 from app.state import feedback_question_store
@@ -217,3 +219,106 @@ async def chat(
     )
 
     return ChatResponse(session_id=session.id, reply=reply)
+
+
+# Keep strong references to fire-and-forget scoring tasks so they aren't GC'd
+# mid-run (the streaming response has already closed by the time they finish).
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _sse(obj: dict) -> str:
+    """One Server-Sent Events frame."""
+    return f"data: {json.dumps(obj)}\n\n"
+
+
+@router.post("/chat/stream")
+async def chat_stream(
+    body: ChatRequest,
+    x_nemotron_key: str | None = Header(default=None, alias="X-Nemotron-Key"),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Streaming twin of /chat: emits the assistant's ANSWER token-by-token as
+    Server-Sent Events. Event shapes: {"type":"token","content":str},
+    {"type":"relevance_warning",...}, {"type":"error","detail":str},
+    {"type":"done"}. The turn is persisted and scoring scheduled only after the
+    full answer streams successfully -- matching /chat's no-write-on-failure rule.
+
+    Uses its own DB sessions (not a request-scoped Depends) because FastAPI can
+    tear those down around a streaming response.
+    """
+
+    async def event_gen():
+        try:
+            async with async_session_factory() as db:
+                session = await get_chat_session(db, body.session_id)
+                if session is None or session.user_id != user.id:
+                    yield _sse({"type": "error", "detail": "ChatSession not found"})
+                    return
+
+                api_key = x_nemotron_key
+                if not api_key:
+                    if not user.nemotron_key_encrypted:
+                        yield _sse({"type": "error", "detail": "No Nemotron API key on file -- save one first"})
+                        return
+                    try:
+                        api_key = decrypt_api_key(user.nemotron_key_encrypted)
+                    except AuthError:
+                        yield _sse({"type": "error", "detail": "Stored API key is unreadable -- re-enter it"})
+                        return
+
+                if await feedback_question_store.get(body.session_id):
+                    yield _sse({"type": "error", "detail": "Answer the pending feedback question before sending a new message"})
+                    return
+
+                # Relevance guardrail (§3.2): emit a warning event and stop
+                # WITHOUT calling Nemotron or persisting anything.
+                task_description = ""
+                if session.task_id is not None:
+                    task = await get_task(db, session.task_id)
+                    task_description = task.description if task else ""
+                    if task is not None and not body.acknowledge_offtopic:
+                        result = await asyncio.to_thread(
+                            evaluate, body.message, session.context_summary or "", task.description
+                        )
+                        if not result.relevant:
+                            yield _sse({
+                                "type": "relevance_warning",
+                                "score": result.score,
+                                "message": _OFFTOPIC_MESSAGE,
+                            })
+                            return
+
+                wire_messages = [*session.messages, {"role": "user", "content": body.message}]
+
+            # Stream the answer -- no DB session held during the long network call.
+            pieces: list[str] = []
+            try:
+                async for piece in stream_chat_message(api_key, wire_messages):
+                    pieces.append(piece)
+                    yield _sse({"type": "token", "content": piece})
+            except NemotronError as exc:
+                yield _sse({"type": "error", "detail": str(exc)})
+                return
+
+            reply = "".join(pieces).strip()
+            if not reply:
+                yield _sse({"type": "error", "detail": "Nemotron returned an empty reply"})
+                return
+
+            # Persist the completed turn, then schedule scoring/feedback.
+            async with async_session_factory() as db:
+                session = await append_turn(db, body.session_id, body.message, reply)
+                messages_snapshot = session.messages
+
+            task = asyncio.create_task(
+                score_and_feedback(body.session_id, task_description, messages_snapshot)
+            )
+            _bg_tasks.add(task)
+            task.add_done_callback(_bg_tasks.discard)
+
+            yield _sse({"type": "done"})
+        except Exception:  # noqa: BLE001 -- never leak a traceback into the stream
+            logger.exception("chat_stream failed for %s", body.session_id)
+            yield _sse({"type": "error", "detail": "Streaming failed"})
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")

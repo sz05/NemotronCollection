@@ -104,3 +104,94 @@ async def send_chat_message(api_key: str, messages: list[dict]) -> str:
         )
 
     return content
+
+
+def _stream_chat_completions(api_key: str, messages: list[dict], queue, loop) -> None:
+    """Blocking SSE reader, run in a worker thread. Parses the OpenAI-style
+    `stream: true` response and pushes ("token", text) items onto `queue` as the
+    ANSWER is produced (reasoning_content deltas are intentionally skipped -- we
+    stream only the final answer). Ends with a None sentinel; on failure pushes
+    ("error", message) first. Uses urllib to match the non-streaming client that
+    works against NVIDIA's gateway (httpx hangs there -- see module docstring)."""
+    payload = json.dumps(
+        {
+            "model": settings.nemotron_model,
+            "messages": messages,
+            "temperature": 0.6,
+            "max_tokens": settings.nemotron_max_tokens,
+            "stream": True,
+        }
+    ).encode()
+
+    request = urllib.request.Request(
+        f"{settings.nemotron_base_url}/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        },
+        method="POST",
+    )
+
+    def put(item) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, item)
+
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            for raw in response:  # iterates the chunked stream line by line
+                line = raw.decode("utf-8", errors="replace").strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[len("data:"):].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    delta = json.loads(data)["choices"][0].get("delta", {})
+                except (KeyError, IndexError, json.JSONDecodeError):
+                    continue
+                piece = delta.get("content")
+                if piece:
+                    put(("token", piece))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")
+        logger.warning("Nemotron stream returned %s: %s", exc.code, body[:500])
+        put(("error", f"Nemotron API returned {exc.code}"))
+    except urllib.error.URLError as exc:
+        logger.warning("Nemotron stream failed: %r", exc.reason)
+        put(("error", f"Nemotron API request failed: {exc.reason}"))
+    except TimeoutError:
+        put(("error", "Nemotron API timed out waiting for a response"))
+    except Exception as exc:  # noqa: BLE001 -- a thread crash must not hang the queue
+        logger.exception("Unexpected Nemotron streaming failure")
+        put(("error", f"Nemotron streaming failed: {exc}"))
+    finally:
+        put(None)
+
+
+async def stream_chat_message(api_key: str, messages: list[dict]):
+    """Async generator yielding the assistant's answer text in deltas as it's
+    produced. Raises NemotronError if the stream errors. The blocking urllib
+    reader runs in a thread and feeds an asyncio.Queue consumed here."""
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+    future = loop.run_in_executor(
+        None, _stream_chat_completions, api_key, messages, queue, loop
+    )
+    try:
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            kind, value = item
+            if kind == "error":
+                raise NemotronError(value)
+            yield value
+    finally:
+        # The thread always ends (it posts the None sentinel), so this returns
+        # promptly on the normal path; guards against a leaked executor thread.
+        if not future.done():
+            try:
+                await future
+            except Exception:  # noqa: BLE001
+                pass

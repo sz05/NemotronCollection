@@ -134,31 +134,51 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
     setPending({ sessionId: sid, text })
     setError(null)
 
+    // Tokens stream into one assistant bubble that's created on the first token,
+    // so the relevance-warning path (no tokens) never leaves an empty bubble.
+    let assistantStarted = false
     try {
-      const { reply, relevance_warning } = await api.sendChatMessage(sid, text, {
+      const { warning } = await api.streamChatMessage(sid, text, {
         acknowledgeOfftopic,
+        onToken: (piece) => {
+          if (activeSessionRef.current !== sid) return
+          setMessages((prev) => {
+            if (!assistantStarted) {
+              assistantStarted = true
+              return [...prev, { role: 'assistant', content: piece }]
+            }
+            const copy = prev.slice()
+            const last = copy[copy.length - 1]
+            if (last?.role === 'assistant') {
+              copy[copy.length - 1] = { ...last, content: last.content + piece }
+            }
+            return copy
+          })
+        },
       })
       if (activeSessionRef.current !== sid) return
 
-      // Off-topic and not yet acknowledged: no answer was produced. Show the
-      // confirm dialog; the optimistic user bubble stays on screen.
-      if (relevance_warning && !acknowledgeOfftopic) {
-        setRelevanceWarning({ warning: relevance_warning, text, sid })
+      // Off-topic and not yet acknowledged: no answer streamed. Show the confirm
+      // dialog; the optimistic user bubble stays on screen.
+      if (warning && !acknowledgeOfftopic) {
+        setRelevanceWarning({ warning: { score: warning.score, message: warning.message }, text, sid })
         return
       }
 
-      setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
       if (isFirstMessage) onFirstMessage?.(sid, text)
       onSent?.(sid)
       fetchSubmitStatus(sid) // this turn may have crossed the unlock threshold
     } catch (err) {
       if (activeSessionRef.current === sid) {
         setError(err.message)
-        // The failed turn was never persisted; drop the optimistic copy so
-        // the view matches the server.
-        setMessages((prev) =>
-          prev[prev.length - 1]?.role === 'user' ? prev.slice(0, -1) : prev
-        )
+        // The failed turn was never persisted; drop any partial assistant bubble
+        // and the optimistic user copy so the view matches the server.
+        setMessages((prev) => {
+          let next = prev
+          if (next[next.length - 1]?.role === 'assistant') next = next.slice(0, -1)
+          if (next[next.length - 1]?.role === 'user') next = next.slice(0, -1)
+          return next
+        })
       }
     } finally {
       setPending(null)
@@ -252,7 +272,9 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
             )}
           </div>
         ))}
-        {sendingHere && <p className="chat-loading">Nemotron is thinking...</p>}
+        {sendingHere && messages[messages.length - 1]?.role !== 'assistant' && (
+          <p className="chat-loading">Nemotron is thinking...</p>
+        )}
         {error && <p className="chat-error">{error}</p>}
       </div>
       {feedbackPending && (

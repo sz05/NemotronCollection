@@ -81,6 +81,61 @@ export const api = {
       body: { session_id: sessionId, message, acknowledge_offtopic: acknowledgeOfftopic },
     }),
 
+  // Streaming twin of sendChatMessage: reads the SSE response and invokes
+  // onToken(text) for each answer delta. Returns { warning } if the backend
+  // returned a relevance warning instead of an answer. Throws on error events.
+  streamChatMessage: async (
+    sessionId,
+    message,
+    { acknowledgeOfftopic = false, nemotronKey, signal, onToken } = {},
+  ) => {
+    const headers = { 'Content-Type': 'application/json' }
+    if (nemotronKey) headers['X-Nemotron-Key'] = nemotronKey
+    if (csrfToken) headers['X-CSRF-Token'] = csrfToken
+
+    const res = await fetch(`${API_BASE_URL}/chat/stream`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        session_id: sessionId,
+        message,
+        acknowledge_offtopic: acknowledgeOfftopic,
+      }),
+      credentials: 'include',
+      signal,
+    })
+    if (!res.ok || !res.body) {
+      const err = new Error(`Chat stream failed: ${res.status}`)
+      err.status = res.status
+      throw err
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    let warning = null
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      // SSE frames are separated by a blank line.
+      let sep
+      while ((sep = buf.indexOf('\n\n')) !== -1) {
+        const frame = buf.slice(0, sep)
+        buf = buf.slice(sep + 2)
+        const dataLine = frame.split('\n').find((l) => l.startsWith('data:'))
+        if (!dataLine) continue
+        const evt = JSON.parse(dataLine.slice(5).trim())
+        if (evt.type === 'token') onToken?.(evt.content)
+        else if (evt.type === 'relevance_warning') warning = evt
+        else if (evt.type === 'error') throw new Error(evt.detail || 'Streaming error')
+        // 'done' -> the reader will report done on the next read
+      }
+    }
+    return { warning }
+  },
+
   // --- feedback ---
   getFeedbackQuestion: (sessionId) => request(`/feedback-question/${sessionId}`),
   submitFeedback: (sessionId, question, answer) =>
