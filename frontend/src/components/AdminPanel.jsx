@@ -1,13 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   Box,
   Button,
-  Chip,
-  Divider,
-  Link,
   MenuItem,
-  Slider,
   Stack,
   Tab,
   Table,
@@ -21,14 +17,11 @@ import {
 } from '@mui/material'
 import { api } from '../api/client'
 
-const STATUS_COLOR = { pending: 'warning', verified: 'success', rejected: 'error' }
-
 // Admin console as a full-screen page (only mounted for allowlisted admins).
-// Three tabs:
-//  - Submissions: every participant PoC, with a % slider to award points,
-//    plus reject. Re-grading a resubmitted PoC raises their points.
+// Scoring is now automatic (Gemini scores each submitted chat), so there's no
+// manual proof-review queue. Two tabs remain:
 //  - Leaderboard: live totals.
-//  - Add task: create a new challenge.
+//  - Add task: create a new challenge/theme.
 function AdminPanel({ open, onExit }) {
   const [tab, setTab] = useState(0)
 
@@ -81,165 +74,17 @@ function AdminPanel({ open, onExit }) {
       </Box>
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ px: 2.5, borderBottom: '1px solid', borderColor: 'divider', flexShrink: 0 }}>
-        <Tab label="Submissions" />
         <Tab label="Leaderboard" />
         <Tab label="Add task" />
       </Tabs>
 
       <Box sx={{ flex: 1, overflowY: 'auto', p: 3 }}>
         <Box sx={{ maxWidth: 960, mx: 'auto' }}>
-          {tab === 0 && <Submissions open={open} />}
-          {tab === 1 && <Leaderboard open={open} />}
-          {tab === 2 && <AddTask open={open} />}
+          {tab === 0 && <Leaderboard open={open} />}
+          {tab === 1 && <AddTask />}
         </Box>
       </Box>
     </Box>
-  )
-}
-
-function Submissions({ open }) {
-  const [proofs, setProofs] = useState([])
-  const [pct, setPct] = useState({}) // proofId -> slider percent
-  const [busy, setBusy] = useState(null)
-  const [error, setError] = useState(null)
-  const [loading, setLoading] = useState(false)
-
-  const load = useCallback(() => {
-    setLoading(true)
-    api
-      .adminListProofs()
-      .then((list) => {
-        setProofs(list)
-        setPct((prev) => {
-          const next = { ...prev }
-          for (const p of list) if (next[p.id] === undefined) next[p.id] = p.percent ?? 100
-          return next
-        })
-        setError(null)
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false))
-  }, [])
-
-  useEffect(() => {
-    if (open) load()
-  }, [open, load])
-
-  async function grade(proof, decision) {
-    setBusy(proof.id)
-    setError(null)
-    try {
-      await api.adminReview(proof.id, {
-        decision,
-        qualityFactor: (pct[proof.id] ?? 100) / 100,
-      })
-      await load()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  async function viewFile(proofId) {
-    try {
-      const url = await api.adminProofFileUrl(proofId)
-      window.open(url, '_blank', 'noopener')
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  if (loading && proofs.length === 0) return <Typography color="text.secondary">Loading…</Typography>
-
-  return (
-    <Stack spacing={1.5}>
-      {error && <Alert severity="error">{error}</Alert>}
-      {proofs.length === 0 && <Typography color="text.secondary">No submissions yet.</Typography>}
-      {proofs.map((p) => (
-        <Box key={p.id} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 1.5 }}>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: 'wrap' }}>
-            <Typography sx={{ fontWeight: 600 }}>{p.user_name || p.user_email}</Typography>
-            <Typography variant="body2" color="text.secondary">
-              {p.user_email}
-            </Typography>
-            <Chip size="small" label={p.status} color={STATUS_COLOR[p.status] || 'default'} />
-            {p.percent != null && (
-              <Chip size="small" variant="outlined" label={`${p.percent}% · ${p.points} pts`} />
-            )}
-          </Stack>
-          <Typography variant="body2" sx={{ mt: 0.5 }}>
-            Task: {p.task_title}{' '}
-            <Typography component="span" variant="caption" color="text.secondary">
-              (base {p.base_points} pts)
-            </Typography>
-          </Typography>
-
-          <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 0.75 }}>
-            {p.has_file && (
-              <Button size="small" variant="outlined" onClick={() => viewFile(p.id)}>
-                View file
-              </Button>
-            )}
-            {p.url && (
-              // Show the full URL as inspectable text (not a bare "Open link"
-              // button) so the reviewer can see where a participant-supplied
-              // link goes before clicking it.
-              <Link
-                href={p.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                variant="body2"
-                title={p.url}
-                sx={{ wordBreak: 'break-all' }}
-              >
-                {p.url} ↗
-              </Link>
-            )}
-          </Stack>
-
-          <Divider sx={{ my: 1 }} />
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Box sx={{ flex: 1, minWidth: 160 }}>
-              <Typography variant="caption" color="text.secondary">
-                Award: {pct[p.id] ?? 100}% of points
-              </Typography>
-              <Slider
-                size="small"
-                value={pct[p.id] ?? 100}
-                onChange={(_, v) => setPct((s) => ({ ...s, [p.id]: v }))}
-                valueLabelDisplay="auto"
-                min={0}
-                max={100}
-              />
-            </Box>
-            <Button
-              size="small"
-              variant="contained"
-              disabled={busy === p.id}
-              onClick={() => grade(p, 'verified')}
-            >
-              {p.status === 'verified' ? 'Re-grade' : 'Verify & award'}
-            </Button>
-            {/* Reject only from the pending state. Once a proof is graded,
-                rejecting it would strand the awarded points (the reject path
-                doesn't remove the award), so a graded proof can only be
-                re-graded; a rejected one can still be verified to award score. */}
-            {p.status === 'pending' && (
-              <Button
-                size="small"
-                color="error"
-                variant="outlined"
-                disabled={busy === p.id}
-                onClick={() => grade(p, 'rejected')}
-              >
-                Reject
-              </Button>
-            )}
-          </Stack>
-        </Box>
-      ))}
-    </Stack>
   )
 }
 
@@ -345,7 +190,7 @@ function AddTask() {
         />
       </Stack>
       <TextField
-        label="Instructions (what proof to submit)"
+        label="Instructions (optional)"
         value={form.instructions}
         onChange={set('instructions')}
         fullWidth

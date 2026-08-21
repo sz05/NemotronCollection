@@ -77,11 +77,11 @@ const ScorePanel = forwardRef(function ScorePanel({ sessionId }, ref) {
         </Typography>
       </Box>
       <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
-        Across all your chats · updates every few turns
+        Across all your chats · updates when you submit
       </Typography>
       <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-          Complete a task and submit proof for bonus points.
+          Chat, then press “Submit chat” to score a theme. Only your best per chat counts.
         </Typography>
       </Box>
     </Paper>

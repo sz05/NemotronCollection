@@ -8,7 +8,6 @@ import ChatView from "./components/ChatView";
 import FeedbackPanel from "./components/FeedbackPanel";
 import LeaderboardModal from "./components/LeaderboardModal";
 import LoginScreen from "./components/LoginScreen";
-import ProofModal from "./components/ProofModal";
 import ScorePanel from "./components/ScorePanel";
 import TaskPicker from "./components/TaskPicker";
 import { useAuth } from "./context/AuthContext";
@@ -24,7 +23,6 @@ function App() {
   const [feedbackPending, setFeedbackPending] = useState(false);
   const [taskPickerOpen, setTaskPickerOpen] = useState(false);
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
-  const [proofOpen, setProofOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [apiKeyOpen, setApiKeyOpen] = useState(false);
   const scorePanelRef = useRef(null);
@@ -123,14 +121,6 @@ function App() {
             <Button size="small" variant="text" onClick={() => setLeaderboardOpen(true)}>
               Leaderboard
             </Button>
-            <Button
-              size="small"
-              variant="contained"
-              disabled={!activeSessionId}
-              onClick={() => setProofOpen(true)}
-            >
-              Submit proof
-            </Button>
             <span className={`backend-status backend-status--${backendStatus}`}>
               {backendStatus}
             </span>
@@ -163,11 +153,6 @@ function App() {
       <LeaderboardModal
         open={leaderboardOpen}
         onClose={() => setLeaderboardOpen(false)}
-      />
-      <ProofModal
-        open={proofOpen}
-        sessionId={activeSessionId}
-        onClose={() => setProofOpen(false)}
       />
       <AdminPanel open={adminOpen} onExit={() => setAdminOpen(false)} />
     </div>

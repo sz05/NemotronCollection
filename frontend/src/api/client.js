@@ -57,37 +57,6 @@ async function request(path, { method = 'GET', body, nemotronKey, signal } = {})
   return captureCsrf(contentType.includes('application/json') ? await res.json() : await res.text())
 }
 
-// Multipart variant: the browser must set the multipart boundary itself, so we
-// deliberately do NOT set Content-Type when sending a FormData body.
-async function requestForm(path, formData, { method = 'POST', nemotronKey, signal } = {}) {
-  const headers = {}
-  if (nemotronKey) headers['X-Nemotron-Key'] = nemotronKey
-  if (csrfToken && !SAFE_METHODS.has(method.toUpperCase())) headers['X-CSRF-Token'] = csrfToken
-
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers,
-    body: formData,
-    credentials: 'include',
-    signal,
-  })
-
-  if (!res.ok) {
-    let detail = await res.text().catch(() => '')
-    try {
-      detail = JSON.parse(detail).detail ?? detail
-    } catch {
-      /* not JSON, keep raw text */
-    }
-    const err = new Error(detail || `API ${method} ${path} failed: ${res.status}`)
-    err.status = res.status
-    throw err
-  }
-
-  const contentType = res.headers.get('content-type') || ''
-  return captureCsrf(contentType.includes('application/json') ? await res.json() : await res.text())
-}
-
 export const api = {
   health: () => request('/health'),
 
@@ -120,32 +89,18 @@ export const api = {
       body: { session_id: sessionId, question, answer },
     }),
 
-  // --- tasks / scoring / proof / leaderboard ---
+  // --- tasks / scoring / submit / leaderboard ---
   getTasks: () => request('/tasks'),
   getScore: (sessionId) => request(`/sessions/${sessionId}/score`),
   getTotalScore: () => request('/score/total'),
   getLeaderboard: (limit = 50) => request(`/leaderboard?limit=${limit}`),
-  submitProof: (sessionId, formData) =>
-    requestForm(`/sessions/${sessionId}/proof`, formData),
-  getProofStatus: (sessionId) => request(`/sessions/${sessionId}/proof`),
+  // Submit the chat for Gemini scoring; returns { score, points, total_score }.
+  submitChat: (sessionId) => request(`/sessions/${sessionId}/submit`, { method: 'POST' }),
+  // Whether the Submit button is unlocked yet (+ best score so far).
+  getSubmitStatus: (sessionId) => request(`/sessions/${sessionId}/submit-status`),
 
   // --- admin (allowlist-gated on the server) ---
   createTask: (task) => request('/tasks', { method: 'POST', body: task }),
-  adminListProofs: () => request('/admin/proofs'),
-  adminReview: (proofId, { decision, qualityFactor, notes }) =>
-    request(`/admin/proofs/${proofId}/review`, {
-      method: 'POST',
-      body: { decision, quality_factor: qualityFactor, notes },
-    }),
-  // Fetches a proof file with the auth cookie and returns an object URL to
-  // view/open (a plain <img src>/<a href> wouldn't send credentials cross-site).
-  adminProofFileUrl: async (proofId) => {
-    const res = await fetch(`${API_BASE_URL}/admin/proofs/${proofId}/file`, {
-      credentials: 'include',
-    })
-    if (!res.ok) throw new Error(`Could not load file (${res.status})`)
-    return URL.createObjectURL(await res.blob())
-  },
 }
 
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')

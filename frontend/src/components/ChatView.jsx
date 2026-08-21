@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api/client'
@@ -29,6 +29,12 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
   const [error, setError] = useState(null)
   // The task/theme locked to this chat (null for a free chat), shown on top.
   const [theme, setTheme] = useState(null)
+  // Submit-to-score state. submitStatus = {can_submit, best_score}; submitResult
+  // is the last 0-100 score the user got (only the score is surfaced, no rationale).
+  const [submitStatus, setSubmitStatus] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitResult, setSubmitResult] = useState(null)
+  const [submitError, setSubmitError] = useState(null)
 
   const activeSessionRef = useRef(sessionId)
   activeSessionRef.current = sessionId
@@ -68,6 +74,38 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
       cancelled = true
     }
   }, [sessionId])
+
+  // Refresh whether the Submit button is unlocked. Recomputed on session switch
+  // and after every sent turn (the unlock gate is a function of message count).
+  const fetchSubmitStatus = useCallback((sid) => {
+    if (!sid) return
+    api.getSubmitStatus(sid).then(setSubmitStatus).catch(() => {})
+  }, [])
+
+  // On session switch: clear the last score and re-check the unlock state.
+  useEffect(() => {
+    setSubmitResult(null)
+    setSubmitError(null)
+    setSubmitStatus(null)
+    if (sessionId) fetchSubmitStatus(sessionId)
+  }, [sessionId, fetchSubmitStatus])
+
+  async function handleSubmitChat() {
+    const sid = sessionId
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      const res = await api.submitChat(sid)
+      if (activeSessionRef.current !== sid) return
+      setSubmitResult(res.score) // show ONLY the score, no rationale
+      onSent?.(sid) // nudge ScorePanel to refetch the total
+      fetchSubmitStatus(sid) // re-lock until the next threshold
+    } catch (err) {
+      if (activeSessionRef.current === sid) setSubmitError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const sendingHere = pending?.sessionId === sessionId
   const ready =
@@ -112,6 +150,7 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
       setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
       if (isFirstMessage) onFirstMessage?.(sid, text)
       onSent?.(sid)
+      fetchSubmitStatus(sid) // this turn may have crossed the unlock threshold
     } catch (err) {
       if (activeSessionRef.current === sid) {
         setError(err.message)
@@ -166,6 +205,37 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
           sessionId && (
             <span style={{ color: '#9b9ca3', fontSize: 12.5 }}>Free chat</span>
           )
+        )}
+        {sessionId && (
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+            {submitResult != null && (
+              <span style={{ color: '#8ee6a1', fontSize: 13, fontWeight: 600 }}>
+                You scored {submitResult}/100
+              </span>
+            )}
+            {submitError && (
+              <span style={{ color: '#ff6b6b', fontSize: 12.5 }}>{submitError}</span>
+            )}
+            {/* title lives on the span so the tooltip shows even when the button
+                is disabled (disabled buttons don't fire hover in most browsers). */}
+            <span
+              title={
+                submitStatus?.can_submit
+                  ? 'Score this chat'
+                  : 'Keep chatting to unlock — explore more, then submit'
+              }
+              style={{ display: 'inline-flex' }}
+            >
+              <button
+                type="button"
+                className="submit-chat-btn"
+                onClick={handleSubmitChat}
+                disabled={!submitStatus?.can_submit || submitting}
+              >
+                {submitting ? 'Scoring…' : 'Submit chat'}
+              </button>
+            </span>
+          </div>
         )}
       </div>
       <div className="chat-messages">
