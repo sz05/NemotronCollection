@@ -129,6 +129,14 @@ async def review(
     # A reviewer must not grade their own submission (security finding C1).
     if proof.user_id == admin.id:
         raise HTTPException(status_code=403, detail="You cannot review your own submission")
+    # Can't reject an already-verified proof: the reject path doesn't remove the
+    # award, so it would strand the points. A graded proof can only be re-graded
+    # (decision="verified"), which updates the award in place.
+    if decision == "rejected" and proof.status == "verified":
+        raise HTTPException(
+            status_code=409,
+            detail="This proof is already verified -- re-grade it instead of rejecting.",
+        )
 
     # quality_factor is already clamped to [0, 1] by the schema (finding C2).
     quality_factor = body.quality_factor if body.quality_factor is not None else 1.0
