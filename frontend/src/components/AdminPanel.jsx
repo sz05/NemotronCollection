@@ -221,15 +221,21 @@ function Submissions({ open }) {
             >
               {p.status === 'verified' ? 'Re-grade' : 'Verify & award'}
             </Button>
-            <Button
-              size="small"
-              color="error"
-              variant="outlined"
-              disabled={busy === p.id}
-              onClick={() => grade(p, 'rejected')}
-            >
-              Reject
-            </Button>
+            {/* Reject only from the pending state. Once a proof is graded,
+                rejecting it would strand the awarded points (the reject path
+                doesn't remove the award), so a graded proof can only be
+                re-graded; a rejected one can still be verified to award score. */}
+            {p.status === 'pending' && (
+              <Button
+                size="small"
+                color="error"
+                variant="outlined"
+                disabled={busy === p.id}
+                onClick={() => grade(p, 'rejected')}
+              >
+                Reject
+              </Button>
+            )}
           </Stack>
         </Box>
       ))}
