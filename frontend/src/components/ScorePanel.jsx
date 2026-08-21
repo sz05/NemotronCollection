@@ -14,6 +14,8 @@ import { api, WS_BASE_URL } from '../api/client'
 const ScorePanel = forwardRef(function ScorePanel({ sessionId }, ref) {
   const [total, setTotal] = useState(null)
   const [error, setError] = useState(null)
+  // Best (highest) score submitted for the ACTIVE chat -- null if never scored.
+  const [bestScore, setBestScore] = useState(null)
 
   const loadTotal = useCallback(() => {
     api
@@ -25,12 +27,29 @@ const ScorePanel = forwardRef(function ScorePanel({ sessionId }, ref) {
       .catch((err) => setError(err.message))
   }, [])
 
+  const loadBest = useCallback((sid) => {
+    if (!sid) {
+      setBestScore(null)
+      return
+    }
+    api
+      .getSubmitStatus(sid)
+      .then((d) => setBestScore(d.best_score ?? null))
+      .catch(() => {})
+  }, [])
+
+  const refresh = useCallback(() => {
+    loadTotal()
+    loadBest(sessionId)
+  }, [loadTotal, loadBest, sessionId])
+
   // Refetch on mount and whenever the active chat changes.
   useEffect(() => {
     loadTotal()
-  }, [loadTotal, sessionId])
+    loadBest(sessionId)
+  }, [loadTotal, loadBest, sessionId])
 
-  useImperativeHandle(ref, () => ({ refresh: loadTotal }), [loadTotal])
+  useImperativeHandle(ref, () => ({ refresh }), [refresh])
 
   // Live push over the active chat's feedback socket. Score frames are
   // {type:'score'}; on one, refetch the cross-chat total.
@@ -46,10 +65,11 @@ const ScorePanel = forwardRef(function ScorePanel({ sessionId }, ref) {
       }
       if (data.type === 'score') {
         loadTotal()
+        loadBest(sessionId) // a submit updates this chat's best too
       }
     }
     return () => ws.close()
-  }, [sessionId, loadTotal])
+  }, [sessionId, loadTotal, loadBest])
 
   if (total === null) return null
 
@@ -79,6 +99,24 @@ const ScorePanel = forwardRef(function ScorePanel({ sessionId }, ref) {
       <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
         Across all your chats · updates when you submit
       </Typography>
+      {sessionId && (
+        <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+          <Typography
+            variant="overline"
+            sx={{ color: 'text.secondary', letterSpacing: '0.08em', fontWeight: 600 }}
+          >
+            This chat’s best
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, mt: 0.25 }}>
+            <Typography sx={{ fontSize: '1.7rem', lineHeight: 1, fontWeight: 700, letterSpacing: '-0.02em' }}>
+              {bestScore != null ? bestScore : '—'}
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              {bestScore != null ? '/ 100' : 'not scored yet'}
+            </Typography>
+          </Box>
+        </Box>
+      )}
       <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
           Chat, then press “Submit chat” to score a theme. Only your best per chat counts.
