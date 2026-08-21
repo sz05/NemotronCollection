@@ -137,9 +137,24 @@ def _parse_scoring_json(text: str) -> dict:
         raise GeminiError("Gemini scoring response was not valid JSON") from exc
 
 
-def _build_submission_prompt(theme: str | None, user_messages: list[str]) -> str:
+def _build_submission_prompt(
+    theme: str | None,
+    user_messages: list[str],
+    difficulty: str | None = None,
+    max_points: int | None = None,
+) -> str:
     turns = "\n".join(f"- {m}" for m in user_messages) or "(none)"
     if theme:
+        stakes = ""
+        if difficulty:
+            stakes = (
+                f"\nThis theme's difficulty is {difficulty.upper()}"
+                + (f" (worth up to {max_points} points)" if max_points else "")
+                + ". Calibrate your strictness to it: the harder the theme, the "
+                "higher the bar. For a HARD theme, only genuinely thorough, "
+                "skilful work should reach 60+, and basic attempts stay low; for "
+                "an EASY theme, solid competent completion can score well.\n"
+            )
         criteria = (
             "The user is working toward a THEME/challenge. Judge ONLY the "
             "user's own messages (the assistant's replies are NOT shown). Weigh "
@@ -147,7 +162,8 @@ def _build_submission_prompt(theme: str | None, user_messages: list[str]) -> str
             "1. COMPLETION -- how far the user's messages actually drive toward "
             "completing the theme.\n"
             "2. APPROACH -- the quality of their prompting: clarity, specificity, "
-            "iteration, and how well they direct the assistant.\n\n"
+            "iteration, and how well they direct the assistant.\n"
+            f"{stakes}\n"
             f"THEME:\n{theme}\n"
         )
     else:
@@ -174,18 +190,24 @@ def _build_submission_prompt(theme: str | None, user_messages: list[str]) -> str
     )
 
 
-async def score_submission(theme: str | None, user_messages: list[str]) -> int:
+async def score_submission(
+    theme: str | None,
+    user_messages: list[str],
+    difficulty: str | None = None,
+    max_points: int | None = None,
+) -> int:
     """Grade a 'Submit chat' event on 0-100 from the user's messages + theme.
 
-    Themed chats are judged on completion + approach; free chats on sensible,
-    non-gibberish engagement. Raises GeminiError on transport/shape failure.
+    Themed chats are judged on completion + approach, with strictness calibrated
+    to the theme's difficulty/ceiling; free chats on sensible, non-gibberish
+    engagement. Raises GeminiError on transport/shape failure.
     """
     if not settings.gemini_api_key:
         raise GeminiError("GEMINI_API_KEY is not configured")
 
     payload = {
         "model": settings.gemini_model,
-        "input": _build_submission_prompt(theme, user_messages),
+        "input": _build_submission_prompt(theme, user_messages, difficulty, max_points),
     }
     headers = {"x-goog-api-key": settings.gemini_api_key}
 

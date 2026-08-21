@@ -99,17 +99,21 @@ async def submit_chat(
             detail="Keep chatting to unlock -- explore the theme more, then submit.",
         )
 
-    # Theme + points ceiling: the task's description/base_points, or a free chat.
+    # Theme + difficulty + points ceiling: the task's, or a free chat's defaults.
     theme: str | None = None
+    difficulty: str | None = None
     ceiling = settings.free_chat_max_points
     if session.task_id is not None:
         task = await get_task(db, session.task_id)
         if task is not None:
             theme = task.description
+            difficulty = task.difficulty
             ceiling = task.base_points
 
     try:
-        score = await score_submission(theme, user_msgs)
+        score = await score_submission(
+            theme, user_msgs, difficulty=difficulty, max_points=ceiling
+        )
     except GeminiError as exc:
         raise HTTPException(status_code=502, detail=f"Scoring failed: {exc}") from exc
 

@@ -111,7 +111,7 @@ async def test_submit_gate_score_and_keep_highest(
         # Reach the threshold; Gemini scores 60 -> points = round(100 * 0.60) = 60.
         await _seed_user_messages(db_session, sid, t1)
 
-        async def score_60(theme, msgs):
+        async def score_60(theme, msgs, **kw):
             assert theme == "desc"  # themed chat passes the task description
             return 60
 
@@ -128,7 +128,7 @@ async def test_submit_gate_score_and_keep_highest(
         assert t2 > t1  # each submit pushes the bar 5-8 messages further
         await _seed_user_messages(db_session, sid, t2)
 
-        async def score_20(theme, msgs):
+        async def score_20(theme, msgs, **kw):
             return 20
 
         monkeypatch.setattr(proof_router, "score_submission", score_20)
@@ -150,7 +150,7 @@ async def test_free_chat_uses_free_ceiling(participant_client, db_session, monke
         await _seed_user_messages(db_session, sid, t1)
         before = (await participant_client.get("/score/total")).json()["total_score"]
 
-        async def score_80(theme, msgs):
+        async def score_80(theme, msgs, **kw):
             assert theme is None  # free chat -> no theme
             return 80
 
