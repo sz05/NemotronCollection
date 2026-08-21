@@ -81,7 +81,6 @@ function TaskPicker({ open, onClose, onPick, usedTaskIds = [], dismissable = tru
                       <Stack direction="row" spacing={1} alignItems="center">
                         <span>{t.title}</span>
                         <Chip size="small" label={t.difficulty} />
-                        <Chip size="small" variant="outlined" label={`${t.base_points} pts`} />
                         {taken && <Chip size="small" color="default" label="In use" />}
                       </Stack>
                     }
