@@ -137,6 +137,76 @@ def _parse_scoring_json(text: str) -> dict:
         raise GeminiError("Gemini scoring response was not valid JSON") from exc
 
 
+def _build_submission_prompt(theme: str | None, user_messages: list[str]) -> str:
+    turns = "\n".join(f"- {m}" for m in user_messages) or "(none)"
+    if theme:
+        criteria = (
+            "The user is working toward a THEME/challenge. Judge ONLY the "
+            "user's own messages (the assistant's replies are NOT shown). Weigh "
+            "two things together:\n"
+            "1. COMPLETION -- how far the user's messages actually drive toward "
+            "completing the theme.\n"
+            "2. APPROACH -- the quality of their prompting: clarity, specificity, "
+            "iteration, and how well they direct the assistant.\n\n"
+            f"THEME:\n{theme}\n"
+        )
+    else:
+        criteria = (
+            "This is a free chat with NO set theme. Judge ONLY whether the user "
+            "is asking sensible, coherent, substantive things. Reward genuine, "
+            "thoughtful engagement; heavily penalise gibberish, spam, one-word "
+            "messages, repetition, or nonsense.\n"
+        )
+    return (
+        "You are a STRICT grader. Grade the user on a 0-100 scale. Be harsh: "
+        "most real effort should land in 40-65; reserve 80+ for genuinely "
+        "excellent work and 96-100 for the truly exceptional. Bands:\n"
+        "- 0-20: gibberish, off-topic, or no real engagement\n"
+        "- 21-40: minimal, vague, little substance\n"
+        "- 41-60: moderate -- some substance but shallow or incomplete\n"
+        "- 61-80: strong -- clear progress and a good approach\n"
+        "- 81-95: excellent -- thorough and skilful\n"
+        "- 96-100: exceptional (rare)\n\n"
+        f"{criteria}\n"
+        "Return ONLY a JSON object, no other text, no markdown, no code fences:\n"
+        '{"score": int}\n\n'
+        f"USER MESSAGES:\n{turns}\n"
+    )
+
+
+async def score_submission(theme: str | None, user_messages: list[str]) -> int:
+    """Grade a 'Submit chat' event on 0-100 from the user's messages + theme.
+
+    Themed chats are judged on completion + approach; free chats on sensible,
+    non-gibberish engagement. Raises GeminiError on transport/shape failure.
+    """
+    if not settings.gemini_api_key:
+        raise GeminiError("GEMINI_API_KEY is not configured")
+
+    payload = {
+        "model": settings.gemini_model,
+        "input": _build_submission_prompt(theme, user_messages),
+    }
+    headers = {"x-goog-api-key": settings.gemini_api_key}
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            response = await client.post(GEMINI_ENDPOINT, headers=headers, json=payload)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise GeminiError(
+                f"Gemini API returned {exc.response.status_code}: {exc.response.text[:500]}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise GeminiError("Gemini API request failed") from exc
+
+    parsed = _parse_scoring_json(_extract_text(response.json()))
+    try:
+        return _clamp_score(parsed["score"])
+    except (KeyError, TypeError) as exc:
+        raise GeminiError("Gemini submission response missing 'score'") from exc
+
+
 async def score_and_summarize(context: dict) -> dict:
     """Score the user's recent turns, refresh the running summary, and emit one
     feedback question in a single Gemini call.

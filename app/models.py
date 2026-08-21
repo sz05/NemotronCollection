@@ -183,3 +183,35 @@ class PointAward(SQLModel, table=True):
     )
     points: int
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+class ChatSubmission(SQLModel, table=True):
+    """One 'Submit chat' event: the user's messages + theme were scored by
+    Gemini. Every submit is logged (audit + drives the next unlock threshold);
+    a chat's effective points is the MAX across its submissions (keep-highest),
+    and a user's total is the sum of that max across all their chats."""
+
+    __tablename__ = "chat_submission"
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(UUID(as_uuid=True), primary_key=True),
+    )
+    session_id: uuid.UUID = Field(
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("chat_session.id"), nullable=False, index=True)
+    )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("app_user.id"), nullable=False, index=True)
+    )
+    # Null for a free (themeless) chat, which is scored on sensible engagement.
+    task_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("task.id"), nullable=True),
+    )
+    # Raw Gemini grade 0-100 and the points it converts to (score% of the
+    # bucket's ceiling: task.base_points, or free_chat_max_points for a free chat).
+    score: int
+    points: int
+    # User-message count at submit time (audit / threshold context).
+    user_msg_count: int
+    created_at: datetime = Field(default_factory=_utcnow)

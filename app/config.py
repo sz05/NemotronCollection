@@ -84,6 +84,15 @@ class Settings(BaseSettings):
     window_llm_turns: int = 4
     difficulty_weights: dict = {"easy": 1.0, "medium": 1.5, "hard": 2.0}
 
+    # --- Submit-to-score (Gemini) ---
+    # Points ceiling for a free (themeless) chat, which has no task.base_points.
+    # points = round(score/100 * ceiling); themed chats use the task's base_points.
+    free_chat_max_points: int = 50
+    # Each submit unlocks after a random(min,max) gap of the user's own messages,
+    # accumulated across submits (e.g. 6 -> 11 -> 19). Deterministic per session.
+    submit_gap_min: int = 5
+    submit_gap_max: int = 8
+
     # --- Proof submission storage ---
     proof_upload_dir: str = "uploads"
     # 15 MB: comfortably covers screenshots and PDF decks (the file proof kinds

@@ -127,6 +127,25 @@ class TotalScoreOut(BaseModel):
     total_score: float
 
 
+# --- Submit chat (Gemini scoring) ---
+class SubmitOut(BaseModel):
+    """Result of a 'Submit chat': only the 0-100 score is surfaced to the user.
+    points/total_score drive the live UI update but the frontend shows the score."""
+
+    score: int
+    points: int
+    total_score: int
+
+
+class SubmitStatusOut(BaseModel):
+    """Drives the Submit button. Deliberately does NOT expose how many more
+    messages are needed -- the UI shows a generic 'keep chatting' nudge."""
+
+    can_submit: bool
+    # Highest score already earned in this chat (None if never submitted).
+    best_score: int | None = None
+
+
 # --- Proof submissions ---
 class ProofOut(BaseModel):
     id: uuid.UUID

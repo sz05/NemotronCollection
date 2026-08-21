@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     ChatSession,
+    ChatSubmission,
     FeedbackEntry,
     PointAward,
     ProofSubmission,
@@ -93,26 +94,69 @@ async def user_has_session_for_task(
     return result.first() is not None
 
 
-async def user_total_score(db: AsyncSession, user_id: uuid.UUID) -> float:
-    """The user's total score = summed chat live_score across their chats PLUS
-    bonus points awarded for verified task proofs. Kept consistent with the
-    leaderboard's total (round(chat) + bonus) so the on-screen number and the
-    board agree."""
-    chat = (
+async def user_total_score(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """The user's total = sum over their chats of that chat's BEST submission
+    points (keep-highest per chat). Automatic live_score no longer contributes
+    -- points come solely from pressing 'Submit chat'."""
+    per_chat_best = (
+        select(func.max(ChatSubmission.points).label("best"))
+        .where(ChatSubmission.user_id == user_id)
+        .group_by(ChatSubmission.session_id)
+        .subquery()
+    )
+    total = (
+        await db.execute(select(func.coalesce(func.sum(per_chat_best.c.best), 0)))
+    ).scalar_one()
+    return int(total)
+
+
+async def create_chat_submission(
+    db: AsyncSession,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID,
+    task_id: uuid.UUID | None,
+    score: int,
+    points: int,
+    user_msg_count: int,
+) -> ChatSubmission:
+    sub = ChatSubmission(
+        session_id=session_id,
+        user_id=user_id,
+        task_id=task_id,
+        score=score,
+        points=points,
+        user_msg_count=user_msg_count,
+    )
+    db.add(sub)
+    await db.commit()
+    await db.refresh(sub)
+    return sub
+
+
+async def count_session_submissions(db: AsyncSession, session_id: uuid.UUID) -> int:
+    """How many times this chat has been submitted -- drives the next unlock
+    threshold (each submit pushes the bar 5-8 user-messages further)."""
+    return int(
+        (
+            await db.execute(
+                select(func.count(ChatSubmission.id)).where(
+                    ChatSubmission.session_id == session_id
+                )
+            )
+        ).scalar_one()
+    )
+
+
+async def session_best_score(db: AsyncSession, session_id: uuid.UUID) -> int | None:
+    """The highest 0-100 score submitted for this chat, or None if never submitted."""
+    val = (
         await db.execute(
-            select(func.coalesce(func.sum(ChatSession.live_score), 0.0)).where(
-                ChatSession.user_id == user_id
+            select(func.max(ChatSubmission.score)).where(
+                ChatSubmission.session_id == session_id
             )
         )
     ).scalar_one()
-    bonus = (
-        await db.execute(
-            select(func.coalesce(func.sum(PointAward.points), 0)).where(
-                PointAward.user_id == user_id
-            )
-        )
-    ).scalar_one()
-    return round(float(chat)) + int(bonus)
+    return int(val) if val is not None else None
 
 
 async def session_has_pending_proof(db: AsyncSession, session_id: uuid.UUID) -> bool:
@@ -405,55 +449,47 @@ async def upsert_award(
 
 
 async def leaderboard(db: AsyncSession, limit: int = 50) -> list[dict]:
-    """Rank users by total score = summed chat live_score across their chats
-    PLUS bonus points awarded for verified task proofs. Everyone with any chat
-    activity appears (not just award-holders); completing + getting a task
-    verified adds bonus points that push them higher."""
-    # Chat score per user: sum of the cumulative live_score across their chats.
-    chat_stmt = (
+    """Rank users by total score = sum over their chats of each chat's BEST
+    submission points (keep-highest per chat). `tasks_completed` here counts the
+    number of chats they've scored on."""
+    # Best points per (user, chat)...
+    per_chat_best = (
         select(
-            ChatSession.user_id.label("user_id"),
-            func.coalesce(func.sum(ChatSession.live_score), 0.0).label("chat_score"),
+            ChatSubmission.user_id.label("user_id"),
+            ChatSubmission.session_id.label("session_id"),
+            func.max(ChatSubmission.points).label("best"),
         )
-        .group_by(ChatSession.user_id)
+        .group_by(ChatSubmission.user_id, ChatSubmission.session_id)
+        .subquery()
     )
-    chat_map = {r.user_id: float(r.chat_score) for r in (await db.execute(chat_stmt)).all()}
-
-    # Bonus points + tasks completed per user from verified proofs (PointAward).
-    points_stmt = (
+    # ...summed per user, with a count of scored chats.
+    agg_stmt = (
         select(
-            PointAward.user_id.label("user_id"),
-            func.coalesce(func.sum(PointAward.points), 0).label("bonus_points"),
-            func.count(PointAward.task_id).label("tasks_completed"),
+            per_chat_best.c.user_id.label("user_id"),
+            func.coalesce(func.sum(per_chat_best.c.best), 0).label("total_points"),
+            func.count().label("chats_scored"),
         )
-        .group_by(PointAward.user_id)
+        .group_by(per_chat_best.c.user_id)
     )
-    points_map = {
-        r.user_id: (int(r.bonus_points), int(r.tasks_completed))
-        for r in (await db.execute(points_stmt)).all()
-    }
+    rows = (await db.execute(agg_stmt)).all()
 
-    # Display names.
     users = (await db.execute(select(User))).scalars().all()
     name_map = {u.id: (u.display_name or u.name or u.email) for u in users}
 
-    # Everyone with chat activity or awarded points is on the board.
-    user_ids = set(chat_map) | set(points_map)
     entries = []
-    for uid in user_ids:
-        chat_score = chat_map.get(uid, 0.0)
-        bonus_points, tasks_completed = points_map.get(uid, (0, 0))
+    for r in rows:
+        total = int(r.total_points or 0)
         entries.append(
             {
-                "user_id": uid,
-                "display_name": name_map.get(uid, ""),
-                # Total is the ranking key: rounded chat score + bonus points.
-                "total_points": round(chat_score) + bonus_points,
-                "chat_score": round(chat_score, 1),
-                "bonus_points": bonus_points,
-                "tasks_completed": tasks_completed,
+                "user_id": r.user_id,
+                "display_name": name_map.get(r.user_id, ""),
+                "total_points": total,
+                # Legacy schema fields kept for the response model; bonus mirrors
+                # total now that submissions are the only points source.
+                "chat_score": 0.0,
+                "bonus_points": total,
+                "tasks_completed": int(r.chats_scored or 0),
             }
         )
-    # Rank by total, then bonus (verified tasks break ties upward).
-    entries.sort(key=lambda e: (e["total_points"], e["bonus_points"]), reverse=True)
+    entries.sort(key=lambda e: e["total_points"], reverse=True)
     return entries[:limit]
