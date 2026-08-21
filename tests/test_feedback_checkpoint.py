@@ -35,6 +35,8 @@ async def _login(client: httpx.AsyncClient) -> str:
     settings.dev_auth = True
     resp = await client.post("/auth/dev-login", json={"email": TEST_EMAIL})
     assert resp.status_code == 200, resp.text
+    # Echo the CSRF token on subsequent writes, like the real client.
+    client.headers["X-CSRF-Token"] = resp.json()["csrf_token"]
     return client.cookies["access_token"]
 
 

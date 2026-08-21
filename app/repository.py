@@ -94,14 +94,37 @@ async def user_has_session_for_task(
 
 
 async def user_total_score(db: AsyncSession, user_id: uuid.UUID) -> float:
-    """Sum of the cumulative live_score across all of the user's chats -- the
-    total shown on screen while they chat."""
+    """The user's total score = summed chat live_score across their chats PLUS
+    bonus points awarded for verified task proofs. Kept consistent with the
+    leaderboard's total (round(chat) + bonus) so the on-screen number and the
+    board agree."""
+    chat = (
+        await db.execute(
+            select(func.coalesce(func.sum(ChatSession.live_score), 0.0)).where(
+                ChatSession.user_id == user_id
+            )
+        )
+    ).scalar_one()
+    bonus = (
+        await db.execute(
+            select(func.coalesce(func.sum(PointAward.points), 0)).where(
+                PointAward.user_id == user_id
+            )
+        )
+    ).scalar_one()
+    return round(float(chat)) + int(bonus)
+
+
+async def session_has_pending_proof(db: AsyncSession, session_id: uuid.UUID) -> bool:
+    """True if this chat already has a proof awaiting review -- used to block a
+    second submission until the first is graded or rejected."""
     result = await db.execute(
-        select(func.coalesce(func.sum(ChatSession.live_score), 0.0)).where(
-            ChatSession.user_id == user_id
+        select(ProofSubmission.id).where(
+            ProofSubmission.session_id == session_id,
+            ProofSubmission.status == "pending",
         )
     )
-    return float(result.scalar_one())
+    return result.first() is not None
 
 
 async def append_message(db: AsyncSession, session_id: uuid.UUID, role: str, content: str) -> ChatSession:
@@ -331,17 +354,50 @@ async def review_proof(
     return proof
 
 
+# --- Proof listing (admin) ---
+async def list_all_proofs(db: AsyncSession) -> list[ProofSubmission]:
+    result = await db.execute(
+        select(ProofSubmission).order_by(ProofSubmission.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_user(db: AsyncSession, user_id: uuid.UUID) -> User | None:
+    return await db.get(User, user_id)
+
+
 # --- Points / leaderboard ---
-async def award_points(
+async def get_award(
+    db: AsyncSession, user_id: uuid.UUID, task_id: uuid.UUID
+) -> PointAward | None:
+    result = await db.execute(
+        select(PointAward).where(
+            PointAward.user_id == user_id, PointAward.task_id == task_id
+        )
+    )
+    return result.scalars().first()
+
+
+async def upsert_award(
     db: AsyncSession,
     user_id: uuid.UUID,
     task_id: uuid.UUID,
     proof_id: uuid.UUID,
     points: int,
 ) -> PointAward:
-    award = PointAward(
-        user_id=user_id, task_id=task_id, proof_id=proof_id, points=points
-    )
+    """Award (or re-award) points for a (user, task). If the user already has
+    an award for this task -- i.e. they resubmitted a better proof and it was
+    re-graded -- update it in place to the latest grade instead of failing the
+    UNIQUE(user, task) constraint. This is what lets a stronger PoC raise a
+    participant's points."""
+    award = await get_award(db, user_id, task_id)
+    if award is None:
+        award = PointAward(
+            user_id=user_id, task_id=task_id, proof_id=proof_id, points=points
+        )
+    else:
+        award.points = points
+        award.proof_id = proof_id
     db.add(award)
     await db.commit()
     await db.refresh(award)

@@ -18,3 +18,5 @@ venv/
 # Data / large files
 *.pdf
 *.sql
+
+security_audit.md

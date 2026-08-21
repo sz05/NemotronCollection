@@ -152,18 +152,19 @@ function ChatView({ sessionId, feedbackPending, onFirstMessage, onSent }) {
             title="This chat's locked theme"
             style={{
               padding: '2px 10px',
-              borderRadius: 999,
-              background: '#e8f0fe',
-              color: '#1a56db',
-              fontSize: 13,
-              fontWeight: 600,
+              borderRadius: 6,
+              background: 'rgba(255,255,255,0.06)',
+              color: '#c9cbd3',
+              border: '1px solid rgba(255,255,255,0.15)',
+              fontSize: 12.5,
+              fontWeight: 500,
             }}
           >
-            🎯 {theme}
+            {theme}
           </span>
         ) : (
           sessionId && (
-            <span style={{ color: '#888', fontSize: 13 }}>Free chat</span>
+            <span style={{ color: '#9b9ca3', fontSize: 12.5 }}>Free chat</span>
           )
         )}
       </div>

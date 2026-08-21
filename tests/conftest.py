@@ -39,6 +39,8 @@ async def auth_client():
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             resp = await c.post("/auth/dev-login", json={"email": TEST_EMAIL})
             assert resp.status_code == 200, resp.text
+            # Echo the CSRF token on subsequent writes, like the real client.
+            c.headers["X-CSRF-Token"] = resp.json()["csrf_token"]
             yield c
     finally:
         settings.dev_auth = original_dev_auth

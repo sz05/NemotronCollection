@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SessionOut(BaseModel):
@@ -49,6 +49,9 @@ class UserOut(BaseModel):
     name: str
     picture: str
     has_nemotron_key: bool
+    is_admin: bool = False
+    # Current CSRF token to echo in the X-CSRF-Token header on writes.
+    csrf_token: str = ""
 
 
 class NemotronKeyRequest(BaseModel):
@@ -130,6 +133,12 @@ class ProofOut(BaseModel):
     status: str
     proof_type: str
     created_at: datetime
+    # Populated once reviewed: quality_factor is the fraction (0..1) the admin
+    # graded; percent/points are the human-facing derivations of it.
+    quality_factor: float | None = None
+    percent: int | None = None
+    points: int | None = None
+    review_notes: str | None = None
 
 
 # --- Leaderboard ---
@@ -152,7 +161,9 @@ class LeaderboardOut(BaseModel):
 # --- Admin review ---
 class ReviewRequest(BaseModel):
     decision: str
-    quality_factor: float | None = None
+    # 0..1 fraction of the task's points to award. Clamped so a request can't
+    # mint arbitrary points (security finding C2).
+    quality_factor: float | None = Field(default=None, ge=0.0, le=1.0)
     notes: str | None = None
 
 
@@ -161,11 +172,22 @@ class AdminProofOut(BaseModel):
     session_id: uuid.UUID
     task_id: uuid.UUID
     user_id: uuid.UUID
+    # Denormalized identity/context so the admin UI needn't do N lookups.
+    user_email: str = ""
+    user_name: str = ""
+    task_title: str = ""
+    base_points: int = 0
     proof_type: str
     storage_ref: str | None
+    has_file: bool = False
     url: str | None
     status: str
     sha256: str | None
     phash: str | None
+    quality_factor: float | None = None
+    percent: int | None = None
+    points: int | None = None
+    review_notes: str | None = None
     meta: dict
     created_at: datetime
+    reviewed_at: datetime | None = None

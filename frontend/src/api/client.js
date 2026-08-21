@@ -13,9 +13,22 @@ function normalizeBaseUrl(url) {
 
 const API_BASE_URL = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL)
 
+// CSRF double-submit: the server returns a token in the login / /auth/me body
+// (the cookie itself is httpOnly). We stash it here and echo it in an
+// X-CSRF-Token header on every state-changing request.
+let csrfToken = null
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
+
+// Capture a refreshed CSRF token from any response body that carries one.
+function captureCsrf(data) {
+  if (data && typeof data === 'object' && data.csrf_token) csrfToken = data.csrf_token
+  return data
+}
+
 async function request(path, { method = 'GET', body, nemotronKey, signal } = {}) {
   const headers = { 'Content-Type': 'application/json' }
   if (nemotronKey) headers['X-Nemotron-Key'] = nemotronKey
+  if (csrfToken && !SAFE_METHODS.has(method.toUpperCase())) headers['X-CSRF-Token'] = csrfToken
 
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method,
@@ -38,7 +51,7 @@ async function request(path, { method = 'GET', body, nemotronKey, signal } = {})
   }
 
   const contentType = res.headers.get('content-type') || ''
-  return contentType.includes('application/json') ? res.json() : res.text()
+  return captureCsrf(contentType.includes('application/json') ? await res.json() : await res.text())
 }
 
 // Multipart variant: the browser must set the multipart boundary itself, so we
@@ -46,6 +59,7 @@ async function request(path, { method = 'GET', body, nemotronKey, signal } = {})
 async function requestForm(path, formData, { method = 'POST', nemotronKey, signal } = {}) {
   const headers = {}
   if (nemotronKey) headers['X-Nemotron-Key'] = nemotronKey
+  if (csrfToken && !SAFE_METHODS.has(method.toUpperCase())) headers['X-CSRF-Token'] = csrfToken
 
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method,
@@ -68,7 +82,7 @@ async function requestForm(path, formData, { method = 'POST', nemotronKey, signa
   }
 
   const contentType = res.headers.get('content-type') || ''
-  return contentType.includes('application/json') ? res.json() : res.text()
+  return captureCsrf(contentType.includes('application/json') ? await res.json() : await res.text())
 }
 
 export const api = {
@@ -111,6 +125,24 @@ export const api = {
   submitProof: (sessionId, formData) =>
     requestForm(`/sessions/${sessionId}/proof`, formData),
   getProofStatus: (sessionId) => request(`/sessions/${sessionId}/proof`),
+
+  // --- admin (allowlist-gated on the server) ---
+  createTask: (task) => request('/tasks', { method: 'POST', body: task }),
+  adminListProofs: () => request('/admin/proofs'),
+  adminReview: (proofId, { decision, qualityFactor, notes }) =>
+    request(`/admin/proofs/${proofId}/review`, {
+      method: 'POST',
+      body: { decision, quality_factor: qualityFactor, notes },
+    }),
+  // Fetches a proof file with the auth cookie and returns an object URL to
+  // view/open (a plain <img src>/<a href> wouldn't send credentials cross-site).
+  adminProofFileUrl: async (proofId) => {
+    const res = await fetch(`${API_BASE_URL}/admin/proofs/${proofId}/file`, {
+      credentials: 'include',
+    })
+    if (!res.ok) throw new Error(`Could not load file (${res.status})`)
+    return URL.createObjectURL(await res.blob())
+  },
 }
 
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.deps import get_current_user
+from app.deps import get_current_user, require_admin
 from app.models import User
 from app.repository import create_task, get_task, list_tasks
 from app.schemas import TaskCreate, TaskOut
@@ -32,7 +32,7 @@ def _to_out(task) -> TaskOut:
 @router.post("/tasks", response_model=TaskOut)
 async def create_task_route(
     body: TaskCreate,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_session),
 ) -> TaskOut:
     task = await create_task(

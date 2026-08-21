@@ -5,12 +5,14 @@ The session JWT is set as an httpOnly cookie so frontend JS never sees it;
 the browser attaches it automatically (fetch uses credentials: 'include').
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import get_session
-from app.deps import get_current_user
+from app.deps import get_current_user, user_is_admin
 from app.models import User
 from app.repository import (
     get_or_create_dev_user,
@@ -26,36 +28,62 @@ from app.schemas import (
 )
 from app.services.auth import (
     AUTH_COOKIE_NAME,
+    CSRF_COOKIE_NAME,
     AuthError,
     create_session_token,
     encrypt_api_key,
+    generate_csrf_token,
     verify_google_token,
 )
 
 router = APIRouter(prefix="/auth")
 
 
-def _user_out(user: User) -> UserOut:
+def _user_out(user: User, csrf_token: str = "") -> UserOut:
     return UserOut(
         id=user.id,
         email=user.email,
         name=user.name,
         picture=user.picture,
         has_nemotron_key=bool(user.nemotron_key_encrypted),
+        is_admin=user_is_admin(user),
+        csrf_token=csrf_token,
     )
 
 
-def _set_auth_cookie(response: Response, user: User) -> None:
+def _cookie_secure() -> bool:
+    # Browsers reject SameSite=None cookies without Secure; plain secure=False
+    # stays for localhost dev where samesite is "lax".
+    return settings.cookie_samesite.lower() == "none"
+
+
+def _set_csrf_cookie(response: Response) -> str:
+    """Set a fresh CSRF cookie and return the token to echo in the body. The
+    cookie is httpOnly (the browser sends it back automatically; the client
+    learns the value from the response body, not by reading the cookie), so an
+    XSS can't lift it either."""
+    token = generate_csrf_token()
+    response.set_cookie(
+        CSRF_COOKIE_NAME,
+        token,
+        max_age=settings.jwt_expiry_days * 24 * 3600,
+        httponly=True,
+        samesite=settings.cookie_samesite,
+        secure=_cookie_secure(),
+    )
+    return token
+
+
+def _set_auth_cookie(response: Response, user: User) -> str:
     response.set_cookie(
         AUTH_COOKIE_NAME,
         create_session_token(user.id),
         max_age=settings.jwt_expiry_days * 24 * 3600,
         httponly=True,
         samesite=settings.cookie_samesite,
-        # Browsers reject SameSite=None cookies without Secure; plain
-        # secure=False stays for localhost dev where samesite is "lax".
-        secure=settings.cookie_samesite.lower() == "none",
+        secure=_cookie_secure(),
     )
+    return _set_csrf_cookie(response)
 
 
 @router.get("/config", response_model=AuthConfigOut)
@@ -69,7 +97,10 @@ async def google_login(
     body: GoogleLoginRequest, response: Response, db: AsyncSession = Depends(get_session)
 ) -> UserOut:
     try:
-        claims = verify_google_token(body.credential)
+        # verify_google_token does a BLOCKING network fetch (Google's signing
+        # certs). Run it off the event loop so a slow/hanging verification
+        # can't freeze every other request (health checks included).
+        claims = await asyncio.to_thread(verify_google_token, body.credential)
     except AuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
@@ -80,8 +111,8 @@ async def google_login(
         name=claims.get("name", ""),
         picture=claims.get("picture", ""),
     )
-    _set_auth_cookie(response, user)
-    return _user_out(user)
+    csrf = _set_auth_cookie(response, user)
+    return _user_out(user, csrf)
 
 
 @router.post("/dev-login", response_model=UserOut)
@@ -94,25 +125,33 @@ async def dev_login(
     if not email or "@" not in email:
         raise HTTPException(status_code=422, detail="Enter a valid email")
     user = await get_or_create_dev_user(db, email)
-    _set_auth_cookie(response, user)
-    return _user_out(user)
+    csrf = _set_auth_cookie(response, user)
+    return _user_out(user, csrf)
 
 
 @router.post("/logout")
 async def logout(response: Response) -> dict:
     # Attributes must match the ones the cookie was set with, or some
     # browsers ignore the deletion.
-    response.delete_cookie(
-        AUTH_COOKIE_NAME,
-        samesite=settings.cookie_samesite,
-        secure=settings.cookie_samesite.lower() == "none",
-    )
+    for name in (AUTH_COOKIE_NAME, CSRF_COOKIE_NAME):
+        response.delete_cookie(
+            name,
+            samesite=settings.cookie_samesite,
+            secure=_cookie_secure(),
+        )
     return {"ok": True}
 
 
 @router.get("/me", response_model=UserOut)
-async def me(user: User = Depends(get_current_user)) -> UserOut:
-    return _user_out(user)
+async def me(
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_user),
+) -> UserOut:
+    # Reuse the existing CSRF cookie, or mint one now (covers sessions created
+    # before CSRF was added). The frontend reads the token from this response.
+    csrf = request.cookies.get(CSRF_COOKIE_NAME) or _set_csrf_cookie(response)
+    return _user_out(user, csrf)
 
 
 @router.put("/nemotron-key", response_model=UserOut)

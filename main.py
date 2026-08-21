@@ -1,14 +1,19 @@
 """FastAPI app entrypoint (task 0.2). CORS wiring is task 0.6."""
 
 import asyncio
+import secrets
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.db import init_db
+from app.services.auth import AUTH_COOKIE_NAME, CSRF_COOKIE_NAME
 from app.services.embeddings import warmup as warmup_embeddings
+
+_CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
 from app.routers.chat import router as chat_router
@@ -33,6 +38,26 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Synthetic Data Collection Harness", lifespan=lifespan)
+
+
+# CSRF (double-submit cookie). Registered before CORS below so CORS stays the
+# outermost middleware (preflight + headers still apply to rejections). Only
+# authenticated, state-changing requests are checked: a request without the
+# auth cookie can't do authenticated harm (it 401s downstream), and safe
+# methods never mutate. The client echoes the CSRF cookie's value in an
+# X-CSRF-Token header; a cross-site forged request can neither read the token
+# nor set a custom header past our CORS allow-list.
+@app.middleware("http")
+async def csrf_protect(request: Request, call_next):
+    if request.method not in _CSRF_SAFE_METHODS and request.cookies.get(AUTH_COOKIE_NAME):
+        cookie = request.cookies.get(CSRF_COOKIE_NAME)
+        header = request.headers.get("x-csrf-token")
+        if not cookie or not header or not secrets.compare_digest(cookie, header):
+            return JSONResponse(
+                status_code=403, content={"detail": "CSRF token missing or invalid"}
+            )
+    return await call_next(request)
+
 
 # Task 0.6: allow the frontend origins (Vite dev + deployed) to call this API
 # directly (SPA, no templates).

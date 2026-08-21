@@ -46,10 +46,17 @@ class Settings(BaseSettings):
     # OAuth 2.0 Web client ID from Google Cloud Console. Login button is
     # hidden on the frontend until this is set.
     google_client_id: str = ""
-    # Signs the session JWT and derives the Fernet key that encrypts stored
-    # Nemotron API keys. MUST be overridden in .env for anything non-local.
+    # Signs the session JWT. MUST be a long, random value in .env for anything
+    # non-local -- generate with: python -c "import secrets; print(secrets.token_urlsafe(48))"
     jwt_secret: str = "dev-only-secret-change-me-before-deploying"
     jwt_expiry_days: int = 7
+    # Separate secret used ONLY to encrypt stored Nemotron API keys (key
+    # separation: a leaked signing secret must not also decrypt stored keys).
+    # Falls back to jwt_secret when empty so existing local setups keep working;
+    # set a distinct random value in .env for anything non-local. Generate with:
+    #   python -c "import secrets; print(secrets.token_urlsafe(48))"
+    # NOTE: changing this invalidates already-stored keys (users re-enter them).
+    api_key_enc_secret: str = ""
     # Dev-only email login (no password) for local testing without a Google
     # client ID. Never enable in production.
     dev_auth: bool = False
@@ -58,6 +65,13 @@ class Settings(BaseSettings):
     # frontend + Railway backend) — browsers drop Lax cookies on cross-site
     # requests. "none" forces Secure=True, so the backend must be on HTTPS.
     cookie_samesite: str = "lax"
+    # Comma-separated emails granted admin rights (proof review + point awards,
+    # task creation). Everyone else is a normal participant. Set in .env.
+    admin_emails: str = ""
+
+    @property
+    def admin_email_set(self) -> set[str]:
+        return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
 
     # --- Semantic relevance + live scoring ---
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
@@ -69,7 +83,9 @@ class Settings(BaseSettings):
 
     # --- Proof submission storage ---
     proof_upload_dir: str = "uploads"
-    proof_max_bytes: int = 10_000_000
+    # 15 MB: comfortably covers screenshots and PDF decks (the file proof kinds
+    # for these tasks); larger artifacts (repos, live sites) go via a URL.
+    proof_max_bytes: int = 15_000_000
 
 
 settings = Settings()

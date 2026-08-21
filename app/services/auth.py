@@ -2,12 +2,14 @@
 encryption for the user's stored Nemotron API key.
 
 The JWT travels in an httpOnly cookie (set by the /auth routes) so it is
-never readable by frontend JS. The Fernet key is derived from jwt_secret so
-one .env secret covers both concerns at this project's scale.
+never readable by frontend JS. The Fernet key that encrypts stored API keys is
+derived from a SEPARATE secret (api_key_enc_secret) so a leaked signing secret
+can't also decrypt stored keys; it falls back to jwt_secret only for local dev.
 """
 
 import base64
 import hashlib
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -19,8 +21,16 @@ from google.oauth2 import id_token as google_id_token
 from app.config import settings
 
 AUTH_COOKIE_NAME = "access_token"
+# Double-submit CSRF token cookie. Sent automatically by the browser; the
+# frontend echoes the same value (obtained from the login / /auth/me response
+# body) in an X-CSRF-Token header, and the server checks they match.
+CSRF_COOKIE_NAME = "csrf_token"
 
 _JWT_ALGORITHM = "HS256"
+
+
+def generate_csrf_token() -> str:
+    return secrets.token_urlsafe(32)
 
 
 class AuthError(Exception):
@@ -50,15 +60,24 @@ def verify_google_token(credential: str) -> dict:
     if not settings.google_client_id:
         raise AuthError("Google login is not configured (GOOGLE_CLIENT_ID missing)")
     try:
-        return google_id_token.verify_oauth2_token(
+        claims = google_id_token.verify_oauth2_token(
             credential, google_requests.Request(), settings.google_client_id
         )
     except ValueError as exc:
         raise AuthError("Google token verification failed") from exc
+    # Reject unverified emails: otherwise someone could sign in with a Google
+    # account whose (unverified) email matches a victim's and claim it.
+    if not claims.get("email_verified"):
+        raise AuthError("Google account email is not verified")
+    return claims
 
 
 def _fernet() -> Fernet:
-    digest = hashlib.sha256(settings.jwt_secret.encode()).digest()
+    # Key separation: encrypt with the dedicated api_key_enc_secret so a leaked
+    # JWT signing secret can't also decrypt stored API keys. Fall back to
+    # jwt_secret only when the dedicated one isn't configured (local dev).
+    secret = settings.api_key_enc_secret or settings.jwt_secret
+    digest = hashlib.sha256(secret.encode()).digest()
     return Fernet(base64.urlsafe_b64encode(digest))
 
 

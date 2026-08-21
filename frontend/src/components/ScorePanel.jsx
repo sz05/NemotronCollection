@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, forwardRef, useState } from 'react'
-import { Paper, Stack, Typography } from '@mui/material'
+import { Box, Paper, Typography } from '@mui/material'
 import { api, WS_BASE_URL } from '../api/client'
 
 // Total score panel: shows the user's cumulative score summed across ALL of
@@ -56,8 +56,11 @@ const ScorePanel = forwardRef(function ScorePanel({ sessionId }, ref) {
   const shown = Math.max(0, Math.round(total))
 
   return (
-    <Paper variant="outlined" sx={{ p: 2 }}>
-      <Typography variant="subtitle1" gutterBottom>
+    <Paper variant="outlined" sx={{ p: 2.25, borderRadius: 2 }}>
+      <Typography
+        variant="overline"
+        sx={{ color: 'text.secondary', letterSpacing: '0.08em', fontWeight: 600 }}
+      >
         Total score
       </Typography>
       {error && (
@@ -65,15 +68,22 @@ const ScorePanel = forwardRef(function ScorePanel({ sessionId }, ref) {
           {error}
         </Typography>
       )}
-      <Stack direction="row" spacing={1} alignItems="baseline">
-        <Typography variant="h4">{shown}</Typography>
-        <Typography variant="caption" color="text.secondary">
-          points · across all your chats
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, mt: 0.25 }}>
+        <Typography sx={{ fontSize: '2.4rem', lineHeight: 1, fontWeight: 700, letterSpacing: '-0.02em' }}>
+          {shown}
         </Typography>
-      </Stack>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-        Complete a task and submit proof for bonus points.
+        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+          pts
+        </Typography>
+      </Box>
+      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
+        Across all your chats · updates every few turns
       </Typography>
+      <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          Complete a task and submit proof for bonus points.
+        </Typography>
+      </Box>
     </Paper>
   )
 })

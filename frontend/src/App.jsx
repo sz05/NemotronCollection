@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Button, Stack } from "@mui/material";
 import { api } from "./api/client";
+import AdminPanel from "./components/AdminPanel";
 import ApiKeyModal from "./components/ApiKeyModal";
 import ChatSidebar from "./components/ChatSidebar";
 import ChatView from "./components/ChatView";
@@ -24,6 +25,8 @@ function App() {
   const [taskPickerOpen, setTaskPickerOpen] = useState(false);
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
   const [proofOpen, setProofOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [apiKeyOpen, setApiKeyOpen] = useState(false);
   const scorePanelRef = useRef(null);
 
   useEffect(() => {
@@ -92,47 +95,60 @@ function App() {
 
   return (
     <div className="app-shell">
-      <ApiKeyModal />
-      <header className="app-header">
-        <h1>Nemotron Harness</h1>
-        <Stack direction="row" spacing={1} alignItems="center">
-          <Button size="small" onClick={() => setLeaderboardOpen(true)}>
-            Leaderboard
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            disabled={!activeSessionId}
-            onClick={() => setProofOpen(true)}
-          >
-            Submit proof
-          </Button>
-          <span className={`backend-status backend-status--${backendStatus}`}>
-            backend: {backendStatus}
-          </span>
-        </Stack>
-      </header>
-      <main className="app-layout app-layout--with-sidebar">
-        <ChatSidebar
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          onSelect={handleSelect}
-          onNewChat={handleNewChat}
-        />
-        <ChatView
-          sessionId={activeSessionId}
-          feedbackPending={feedbackPending}
-          onFirstMessage={refreshSessions}
-          onSent={() => scorePanelRef.current?.refresh()}
-        />
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <ScorePanel ref={scorePanelRef} sessionId={activeSessionId} />
-          <FeedbackPanel
+      <ApiKeyModal open={apiKeyOpen} onClose={() => setApiKeyOpen(false)} />
+      <ChatSidebar
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onSelect={handleSelect}
+        onNewChat={handleNewChat}
+      />
+      <div className="app-main">
+        <header className="app-header">
+          <div className="app-brand">
+            <span className="app-logo">N</span>
+            <h1 className="app-title">Nemotron Harness</h1>
+          </div>
+          <Stack direction="row" spacing={1} alignItems="center">
+            {user.is_admin && (
+              <Button size="small" variant="text" onClick={() => setAdminOpen(true)}>
+                Admin
+              </Button>
+            )}
+            <Button size="small" variant="text" onClick={() => setApiKeyOpen(true)}>
+              API key
+            </Button>
+            <Button size="small" variant="text" onClick={() => setLeaderboardOpen(true)}>
+              Leaderboard
+            </Button>
+            <Button
+              size="small"
+              variant="contained"
+              disabled={!activeSessionId}
+              onClick={() => setProofOpen(true)}
+            >
+              Submit proof
+            </Button>
+            <span className={`backend-status backend-status--${backendStatus}`}>
+              {backendStatus}
+            </span>
+          </Stack>
+        </header>
+        <main className="app-content">
+          <ChatView
             sessionId={activeSessionId}
-            onPendingChange={setFeedbackPending}
+            feedbackPending={feedbackPending}
+            onFirstMessage={refreshSessions}
+            onSent={() => scorePanelRef.current?.refresh()}
           />
-        </Box>
-      </main>
+          <Box className="app-rail">
+            <ScorePanel ref={scorePanelRef} sessionId={activeSessionId} />
+            <FeedbackPanel
+              sessionId={activeSessionId}
+              onPendingChange={setFeedbackPending}
+            />
+          </Box>
+        </main>
+      </div>
 
       <TaskPicker
         open={taskPickerOpen}
@@ -149,6 +165,7 @@ function App() {
         sessionId={activeSessionId}
         onClose={() => setProofOpen(false)}
       />
+      <AdminPanel open={adminOpen} onExit={() => setAdminOpen(false)} />
     </div>
   );
 }
