@@ -1,75 +1,42 @@
-# Combined frontend + backend image: one FastAPI process serves the API and
-# the built React static bundle on a single port. Three stages:
-#   1. frontend-builder -- npm build (Vite bakes VITE_* vars in at build time)
-#   2. backend-builder   -- Python deps into a venv (sentence-transformers
-#      pulls in torch, so this is the heaviest/slowest layer -- kept separate
-#      from app code so it's cached across code-only changes)
-#   3. runtime            -- slim final image: venv + app code + frontend dist
+# Backend-only image for the split deployment: FastAPI API on Coolify, React
+# frontend deployed separately on Vercel. (The old combined image built the
+# frontend in here too; not needed when Vercel serves it.)
+#
+# Embeddings run on fastembed (ONNX Runtime), so there is no torch and no
+# libgomp1 — the image is ~700MB instead of multiple GB.
 
-FROM node:22-slim AS frontend-builder
+FROM python:3.12-slim
+WORKDIR /app
 
-WORKDIR /build
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install
-
-COPY frontend/ .
-
-# Left empty by default: the combined image serves the API and the static
-# bundle from the same origin, so the frontend just calls same-origin
-# relative paths (see normalizeBaseUrl in src/api/client.js) -- this works
-# regardless of what hostname/port/protocol you actually browse to, unlike
-# baking in a literal "http://localhost:8000" that only matches if you visit
-# that exact origin. Only set this if the frontend needs to call a backend on
-# a genuinely different origin (e.g. a split Vercel + Railway deployment).
-ARG VITE_API_BASE_URL=
-ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
-RUN npm run build
-
-
-FROM python:3.12-slim AS backend-builder
-
-WORKDIR /build
-
-RUN python -m venv /venv
-ENV PATH="/venv/bin:$PATH"
-
+RUN pip install --no-cache-dir --upgrade pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download the embedding model into the image so containers don't hit the
-# network (or pay a multi-second cold start) on first /chat. Keep this model
-# id in sync with `embedding_model` in app/config.py.
-RUN python -c "from sentence_transformers import SentenceTransformer; \
-    SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
-
-
-FROM python:3.12-slim AS runtime
-
-WORKDIR /app
-
-# libgomp1: required by torch's CPU backend at import time.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=backend-builder /venv /venv
-COPY --from=backend-builder /root/.cache/huggingface /root/.cache/huggingface
-ENV PATH="/venv/bin:$PATH"
-
 COPY app ./app
 COPY main.py .
-COPY --from=frontend-builder /build/dist ./static
 
-# Proof-upload storage (see PROOF_UPLOAD_DIR in app/config.py). Mount a volume
-# here in compose/prod -- local disk on most PaaS is ephemeral.
+# Pre-download the embedding model (all-MiniLM-L6-v2 ONNX, ~90MB) into the
+# image so the first /chat pays no network round-trip or cold-start download.
+# Keep this id in sync with `embedding_model` in app/config.py.
+ENV FASTEMBED_CACHE_PATH=/app/.cache/fastembed
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/all-MiniLM-L6-v2')"
+
+# Proof-upload storage (PROOF_UPLOAD_DIR in app/config.py). Mount a Coolify
+# persistent volume here in prod — local disk is wiped on every redeploy.
 RUN mkdir -p /app/uploads
 
-RUN useradd --create-home appuser \
-    && chown -R appuser:appuser /app
+# Never run as root. appuser owns /app so uploads and the model cache are
+# writable/readable at runtime.
+RUN useradd --create-home appuser && chown -R appuser:appuser /app
 USER appuser
 
 ENV PORT=8000
 EXPOSE 8000
 
+# main.py mounts ./static only if it exists; in this split image it doesn't,
+# so the app is API-only. init_db() + model warmup run on startup; /health
+# returns immediately regardless.
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT}"]

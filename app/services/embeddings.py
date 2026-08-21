@@ -1,9 +1,16 @@
 """Sentence embedding helpers for semantic relevance + scoring.
 
-Heavy deps (sentence_transformers/torch) are imported lazily inside functions
-so importing this module never fails when they are absent. The model is loaded
-once and cached in a module-level singleton; any load failure yields None so
-callers can fail open.
+Backed by fastembed (ONNX Runtime) rather than sentence-transformers/torch:
+same `all-MiniLM-L6-v2` weights and vectors, but ~200MB resident instead of
+~1GB and a ~1-2s cold start instead of several seconds -- no torch in the
+image. The heavy dep is imported lazily inside `_get_model` so importing this
+module never fails when it's absent; the model is loaded once and cached in a
+module-level singleton, and any load failure yields None so callers fail open.
+
+fastembed L2-normalizes its output; sentence-transformers here did not
+(`normalize_embeddings=False`). This does not change any downstream score:
+`cosine()` self-normalizes, so cosine(a, b) is identical for normalized and
+un-normalized vectors. `relevance_threshold` is therefore unaffected.
 """
 
 import math
@@ -17,21 +24,30 @@ _load_failed = False
 
 
 def _get_model():
-    """Lazily load and cache the SentenceTransformer, or None if unavailable."""
+    """Lazily load and cache the fastembed TextEmbedding, or None if unavailable."""
     global _model, _load_failed
     if _model is not None:
         return _model
     if _load_failed:
         return None
     try:
-        from sentence_transformers import SentenceTransformer
+        from fastembed import TextEmbedding
 
-        _model = SentenceTransformer(settings.embedding_model)
+        _model = TextEmbedding(model_name=settings.embedding_model)
         return _model
     except Exception:
-        # Missing dep, no network for model download, incompatible torch, etc.
+        # Missing dep, no network for the one-time model download, etc.
         _load_failed = True
         return None
+
+
+def _embed_one(model, text: str):
+    """Run one text through fastembed, returning its numpy vector.
+
+    `.embed()` takes an iterable and returns a generator of ndarrays; we pull
+    the single result out.
+    """
+    return next(iter(model.embed([text])))
 
 
 def warmup() -> bool:
@@ -42,7 +58,7 @@ def warmup() -> bool:
     if model is None:
         return False
     try:
-        model.encode("warmup", convert_to_numpy=True)
+        _embed_one(model, "warmup")
         return True
     except Exception:
         return False
@@ -53,7 +69,7 @@ def _encode(text: str) -> list[float] | None:
     if model is None:
         return None
     try:
-        vec = model.encode(text, convert_to_numpy=True, normalize_embeddings=False)
+        vec = _embed_one(model, text)
         return [float(x) for x in vec.tolist()]
     except Exception:
         return None

@@ -74,6 +74,9 @@ class Settings(BaseSettings):
         return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
 
     # --- Semantic relevance + live scoring ---
+    # Served via fastembed (ONNX). This exact id is a native fastembed model,
+    # so the weights/vectors match the old sentence-transformers backend and
+    # relevance_threshold below is unchanged.
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     relevance_threshold: float = 0.10
     score_interval_turns: int = 4
